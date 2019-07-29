@@ -43,7 +43,11 @@ e=entrypoint, s=source, p=program, n=natmap);
 
     let (source_dir, _source_sfn) = source.split_at(source.rfind('/').expect("source does not contain '/'"));
 
-
+    //Ok(ListStatusResponse { file_statuses: FileStatuses { file_status: [FileStatus { 
+    // access_time: 1564409836087, block_size: 134217728, group: "hadoop", length: 423941508, 
+    // modification_time: 1564409849727, owner: "root", path_suffix: "soc-pokec-relationships.txt", 
+    // permission: "644", replication: 3, type_: "FILE" 
+    //}] } })
     println!("{:?}", dir(&cx, source_dir))
 
 }

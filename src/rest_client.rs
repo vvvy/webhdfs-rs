@@ -87,29 +87,6 @@ fn http_process_json_response<R>(
         })
 }
 
-/*
-fn http_process_json_response<R>(
-    rf: ResponseFuture
-) -> impl Future<Item=R, Error=Error> + Send
-    where R: serde::de::DeserializeOwned + Send {
-    rf
-        //.map_err(|err| err.into())
-        .from_err()
-        .and_then(|res| {
-            match extract_content_type(&res) {
-                Ok(ref ct) if ct.type_() == mime::APPLICATION && ct.subtype() == mime::JSON => futures::future::ok(res),
-                Ok(ct) => futures::future::err(app_error!(generic "invalid content type `{}`", ct)),
-                Err(e) => futures::future::err(e)
-            }
-        })
-        .and_then(|res|
-            res.into_body().concat2().from_err()
-        )
-        .and_then(|body|
-            serde_json::from_slice(&body).map_err(|err| err.into())
-        )
-}
-*/
 
 fn http_attach_json_request_data<Q>(mut req: RequestBuilder, q: &Q)-> Result<Request<Body>>
     where Q: serde::ser::Serialize

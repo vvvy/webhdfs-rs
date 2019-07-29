@@ -237,6 +237,9 @@ case "$1" in
     --validate)
         validate
         ;;
+    --create-natmap)
+        create-natmap
+        ;;
     --upload)
         upload
         ;;
