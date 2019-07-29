@@ -2,17 +2,12 @@
 mod error;
 mod rest_client;
 mod datatypes;
+mod natmap;
 mod uri_tools;
 
-//use std::io::{Read, Seek, SeekFrom};
-//use std::io::Result as IoResult;
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::cell::RefCell;
 
-//use serde::{Serialize, Deserialize};
-
-use http::{Uri, uri::Parts as UriParts, uri::Authority};
+use http::{Uri, uri::Parts as UriParts};
 
 use tokio::runtime::Runtime;
 use futures::Future;
@@ -22,7 +17,7 @@ use rest_client::HttpxClient;
 use uri_tools::*;
 use datatypes::*;
 
-
+pub use natmap::{NatMap, NatMapPtr};
 
 #[derive(Debug)]
 pub enum Op {
@@ -50,59 +45,6 @@ impl OpArg {
     }
 }
 
-pub struct NatMap {
-    natmap: HashMap<String, Authority>
-}
-
-impl NatMap {
-    pub fn new(mut src: impl Iterator<Item=(String, String)>) -> Result<NatMap> {
-        src
-        .try_fold(
-            HashMap::new(), 
-            |mut m, (k, v)| v.parse().aerr_f(|| format!("cannot parse NAT value for k={}", k)).map(|v| { m.insert(k, v); m } )
-        ).map(|natmap| NatMap { natmap })
-    }
-    pub fn translate(&self, uri: Uri) -> Result<Uri> {
-        if self.natmap.is_empty() {
-            Ok(uri)
-        } else {
-            if let Some(s) = uri.authority_part() {
-                if let Some(replacement) = self.natmap.get(s.as_str()) {
-                    let mut parts = uri.into_parts();
-                    parts.authority = Some(replacement.clone());
-                    Ok(http::uri::Uri::from_parts(parts).aerr("Could not assemble redirect uri after NAT")?)
-                } else {
-                    Ok(uri)
-                }        
-            } else { 
-                Ok(uri) 
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct NatMapPtr {
-    ptr: Option<Arc<NatMap>>
-}
-
-impl NatMapPtr {
-    pub fn new(natmap: NatMap) -> NatMapPtr {
-        NatMapPtr { ptr: if natmap.natmap.is_empty() { None } else { Some(Arc::new(natmap)) } }
-    }
-
-    pub fn empty() -> NatMapPtr {
-        NatMapPtr { ptr: None }
-    }
-
-    pub fn translate(&self, uri: Uri) -> Result<Uri> {
-        if let Some(p) = &self.ptr {
-            p.translate(uri)
-        } else {
-            Ok(uri)
-        }
-    }
-}
 
 
 pub struct HdfsContext {
@@ -162,42 +104,10 @@ impl Seek for ReadHdfsFile {
 }
 */
 
-fn get_with_redirect<R>(uri: Uri, natmap: NatMapPtr)  -> impl Future<Item=R, Error=Error> + Send
-where R: serde::de::DeserializeOwned + Send + 'static {
-
-    fn do_get<R>(uri: Uri) -> Box<dyn Future<Item=R, Error=Error> + Send> 
-    where R: serde::de::DeserializeOwned + Send + 'static {
-        match HttpxClient::new(&uri) {
-            Ok(c) => Box::new(c.get::<R>(uri)),
-            Err(e) => Box::new(futures::future::err(e))
-        }
-    }
-
-    fn handle_redirect<R>(r: Result<R>, natmap: NatMapPtr) -> Box<dyn Future<Item=R, Error=Error> + Send>
-    where R: serde::de::DeserializeOwned + Send + 'static {
-        use futures::future::{ok, err};
-        match r {
-            Ok(r) => Box::new(ok(r)),
-            Err(e) => match e.to_http_redirect() {
-                Ok((_code, location)) => match location.parse() {
-                    Ok(uri) => match natmap.translate(uri) { 
-                        Ok(uri) => do_get(uri),
-                        Err(e) => Box::new(err(e))
-                    }
-                    Err(e) => Box::new(err(app_error!((cause=e) "Cannot parse location URI returned by redirect")))
-                }
-                Err(e) => Box::new(err(e))
-            }
-        }
-    }
-
-    do_get::<R>(uri).then(|r| handle_redirect(r, natmap))
-}
-
 
 pub fn dir_async(cx: &HdfsContext, path: &str) -> impl Future<Item=ListStatusResponse, Error=Error> {
     let natmap = cx.natmap.clone();
-    futures::future::result(cx.uri(path, Op::LISTSTATUS, vec![])).and_then(|uri| get_with_redirect(uri, natmap))
+    futures::future::result(cx.uri(path, Op::LISTSTATUS, vec![])).and_then(|uri| HttpxClient::get_with_redirect(uri, natmap))
 }
 
 pub fn dir(cx: &HdfsContext, path: &str) -> Result<ListStatusResponse> {

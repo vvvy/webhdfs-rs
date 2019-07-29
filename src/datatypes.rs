@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use serde::{Deserialize};
 
 /*
@@ -16,12 +17,26 @@ Transfer-Encoding: chunked
 */
 
 #[derive(Debug, Deserialize)]
-struct RemoteException {
-    exception: String,
+pub struct RemoteException {
+    pub exception: String,
     #[serde(rename="javaClassName")]
-    java_class_name: String,
-    message: String
+    pub java_class_name: String,
+    pub message: String
 }
+
+impl Display for RemoteException {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, 
+            "RemoteException[exception={}, java_class_name={}, msg='{}']", 
+            self.exception, self.java_class_name, self.message
+        )
+    }
+}
+
+impl std::error::Error for RemoteException {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+}
+
 
 /*
 {

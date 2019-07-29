@@ -155,7 +155,9 @@ impl QueryEncoder {
         self
     }
     
-    pub fn result(self) -> Vec<u8> { self.path_and_query } 
+    pub fn result(self) -> Vec<u8> { self.path_and_query }
+
+    #[allow(dead_code)]
     pub fn result_with_fragment(mut self, f: &str) -> Vec<u8> {
         if !f.is_empty() {
             self.path_and_query.push(b'#');
@@ -186,6 +188,7 @@ impl PathEncoder {
         QueryEncoder { path_and_query: self.path_and_query, qm_added: false }
     }
 
+    #[allow(dead_code)]
     pub fn result(self) -> Vec<u8> { self.path_and_query } 
 }
 

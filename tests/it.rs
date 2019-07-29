@@ -38,7 +38,8 @@ natmap={n:?}",
 e=entrypoint, s=source, p=program, n=natmap);
 
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
-    let cx = HdfsContext::new(entrypoint.parse().expect("Cannot parse entrypoint"), nm).expect("cannot HdfsContext::new");
+    let entrypoint_uri = "http://".to_owned() + &entrypoint;
+    let cx = HdfsContext::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"), nm).expect("cannot HdfsContext::new");
 
     let (source_dir, _source_sfn) = source.split_at(source.rfind('/').expect("source does not contain '/'"));
 

@@ -10,8 +10,6 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 pub use std::result::Result as StdResult;
 pub type Result<T> = StdResult<T, Error>;
 
-
-
 #[derive(Debug)]
 pub enum Cause {
     None,
@@ -24,6 +22,7 @@ pub enum Cause {
     HttpInvalidUri(http::uri::InvalidUri),
     HttpInvalidUriParts(http::uri::InvalidUriParts),
     Io(std::io::Error),
+    RemoteException(crate::datatypes::RemoteException),
     HttpRedirect(u16, String)
 }
 
@@ -74,6 +73,7 @@ impl Display for Error {
             Cause::HttpInvalidUri(e) => write!(f, "; caused by http::uri::InvalidUri: {}", e),
             Cause::HttpInvalidUriParts(e) => write!(f, "; caused by http::uri::InvalidUriParts: {}", e),
             Cause::Io(e) => write!(f, "; caused by IoError: {}", e),
+            Cause::RemoteException(e) => write!(f, "; caused by RemoteException {}", e),
             Cause::HttpRedirect(code, location) => write!(f, "; caused by HTTP redirect {} {}", code, location),
             Cause::None => Ok(())
         }
@@ -92,6 +92,7 @@ impl std::error::Error for Error {
             Cause::HttpInvalidUri(e) => Some(e),
             Cause::HttpInvalidUriParts(e) => Some(e),
             Cause::Io(e) => Some(e),
+            Cause::RemoteException(e) => Some(e),
             Cause::HttpRedirect(_, _) => None,
             Cause::None => None
         }
@@ -171,7 +172,8 @@ error_conversions!{
     Http(http::Error),
     HttpInvalidUri(http::uri::InvalidUri),
     HttpInvalidUriParts(http::uri::InvalidUriParts),
-    Io(std::io::Error)
+    Io(std::io::Error),
+    RemoteException(crate::datatypes::RemoteException)
 }
 
 impl From<Error> for std::io::Error {
