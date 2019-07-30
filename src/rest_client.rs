@@ -31,7 +31,7 @@ fn redirect_filter(res: Response<Body>) -> Result<Response<Body>> {
     let status = res.status();
     if status.is_redirection() {
         if let Some(location) = res.headers().get(hyper::header::LOCATION) {
-            Err(Error::anon(Cause::HttpRedirect(status.as_u16(), location.to_str()?.to_string())))
+            Err(Error::from_http_redirect(status.as_u16(), location.to_str()?.to_string()))
         } else {
             Err(app_error!(generic "Redirect without Location header"))
         }

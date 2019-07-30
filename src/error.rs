@@ -23,7 +23,8 @@ pub enum Cause {
     HttpInvalidUriParts(http::uri::InvalidUriParts),
     Io(std::io::Error),
     RemoteException(crate::datatypes::RemoteException),
-    HttpRedirect(u16, String)
+    HttpRedirect(u16, String),
+    Timeout
 }
 
 #[derive(Debug)]
@@ -52,6 +53,9 @@ impl Error {
             None => "GENERIC"
         }
     }
+    pub fn from_http_redirect(status: u16, location: String) -> Self {
+        Self::new(None, Cause::HttpRedirect(status, location))
+    }
     pub fn to_http_redirect(self) -> Result<(u16, String)> {
         match self.cause {
             Cause::HttpRedirect(code, location) => Ok((code, location)),
@@ -75,6 +79,7 @@ impl Display for Error {
             Cause::Io(e) => write!(f, "; caused by IoError: {}", e),
             Cause::RemoteException(e) => write!(f, "; caused by RemoteException {}", e),
             Cause::HttpRedirect(code, location) => write!(f, "; caused by HTTP redirect {} {}", code, location),
+            Cause::Timeout  => write!(f, "; caused by Timeout"),
             Cause::None => Ok(())
         }
     }
@@ -94,6 +99,7 @@ impl std::error::Error for Error {
             Cause::Io(e) => Some(e),
             Cause::RemoteException(e) => Some(e),
             Cause::HttpRedirect(_, _) => None,
+            Cause::Timeout => None,
             Cause::None => None
         }
     }

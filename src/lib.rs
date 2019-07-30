@@ -50,17 +50,29 @@ impl OpArg {
 pub struct HdfsContext {
     entrypoint: UriParts,
     natmap: NatMapPtr,
-    rt: RefCell<Runtime>
+    rt: RefCell<Runtime>,
+    default_timeout_s: u64
 }
 
 impl HdfsContext {
     const SVC_MOUNT_POINT: &'static str = "/webhdfs/v1";
+    const DEFAULT_TIMEOUT_S: u64 = 30;
 
     pub fn new(entrypoint: Uri, natmap: NatMap) -> Result<HdfsContext> {
-        Ok(Self { entrypoint: entrypoint.into_parts(), natmap: NatMapPtr::new(natmap), rt: RefCell::new(Runtime::new()?) })
+        Ok(Self { 
+            entrypoint: entrypoint.into_parts(), 
+            natmap: NatMapPtr::new(natmap), 
+            rt: RefCell::new(Runtime::new()?),
+            default_timeout_s: Self::DEFAULT_TIMEOUT_S
+        })
     }
     pub fn from_entrypoint(entrypoint: Uri) -> Result<HdfsContext> {
-        Ok(Self { entrypoint: entrypoint.into_parts(), natmap: NatMapPtr::empty(), rt: RefCell::new(Runtime::new()?) })
+        Ok(Self { 
+            entrypoint: entrypoint.into_parts(), 
+            natmap: NatMapPtr::empty(), 
+            rt: RefCell::new(Runtime::new()?),
+            default_timeout_s: Self::DEFAULT_TIMEOUT_S
+        })
     }
     fn uri(&self, file_path: &str, op: Op, args: Vec<OpArg>) -> Result<Uri> {
         let mut b = Uri::builder();        
@@ -76,6 +88,27 @@ impl HdfsContext {
         .aerr_f(|| format!("Could not build URI: file_path={}, op={:?}, args={:?}", file_path, op, args))
     }
 }
+
+fn with_timeout<R>(f: impl Future<Item=R, Error=Error>, timeout: u64) -> impl Future<Item=R, Error=Error> {
+    use std::time::Duration;
+    use tokio::prelude::FutureExt;
+    f.timeout(Duration::from_secs(timeout)).map_err(|e| match e.into_inner() {
+        Some(e) => e,
+        None => app_error!(generic "Timeout")
+    })
+}
+
+
+pub fn dir_async(cx: &HdfsContext, path: &str) -> impl Future<Item=ListStatusResponse, Error=Error> {
+    let natmap = cx.natmap.clone();
+    futures::future::result(cx.uri(path, Op::LISTSTATUS, vec![]))
+        .and_then(|uri| HttpxClient::get_with_redirect(uri, natmap))
+}
+
+pub fn dir(cx: &HdfsContext, path: &str) -> Result<ListStatusResponse> {
+    cx.rt.borrow_mut().block_on(with_timeout(dir_async(cx, path), cx.default_timeout_s))
+}
+
 
 /*
 pub struct ReadHdfsFile {
@@ -103,15 +136,3 @@ impl Seek for ReadHdfsFile {
     }
 }
 */
-
-
-pub fn dir_async(cx: &HdfsContext, path: &str) -> impl Future<Item=ListStatusResponse, Error=Error> {
-    let natmap = cx.natmap.clone();
-    futures::future::result(cx.uri(path, Op::LISTSTATUS, vec![])).and_then(|uri| HttpxClient::get_with_redirect(uri, natmap))
-}
-
-pub fn dir(cx: &HdfsContext, path: &str) -> Result<ListStatusResponse> {
-    //let uri = cx.uri(path, Op::LISTSTATUS, vec![])?;
-    //let future = get_with_redirect(uri, cx.natmap.clone());
-    cx.rt.borrow_mut().block_on(dir_async(cx, path))
-}
