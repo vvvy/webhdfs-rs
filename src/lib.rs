@@ -9,7 +9,7 @@ use std::cell::RefCell;
 
 use http::{Uri, uri::Parts as UriParts};
 
-use tokio::runtime::Runtime;
+use tokio::runtime::current_thread::Runtime;
 use futures::Future;
 
 use error::*;
