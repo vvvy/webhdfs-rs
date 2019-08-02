@@ -123,3 +123,31 @@ pub struct FileStatus {
     #[serde(rename="type")]
     pub type_: String
 }
+
+/*
+HTTP/1.1 200 OK
+Content-Type: application/json
+Transfer-Encoding: chunked
+
+{
+  "FileStatus":
+  {
+    "accessTime"      : 0,
+    "blockSize"       : 0,
+    "group"           : "supergroup",
+    "length"          : 0,             //in bytes, zero for directories
+    "modificationTime": 1320173277227,
+    "owner"           : "webuser",
+    "pathSuffix"      : "",
+    "permission"      : "777",
+    "replication"     : 0,
+    "type"            : "DIRECTORY"    //enum {FILE, DIRECTORY, SYMLINK}
+  }
+}
+*/
+
+#[derive(Debug, Deserialize)]
+pub struct FileStatusResponse {
+    #[serde(rename="FileStatus")]
+    pub file_status: FileStatus
+}

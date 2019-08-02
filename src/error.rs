@@ -1,9 +1,4 @@
-use hyper;
-use hyper_tls;
-use mime;
-use serde_json;
-use http;
-use std;
+
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -22,6 +17,7 @@ pub enum Cause {
     HttpInvalidUri(http::uri::InvalidUri),
     HttpInvalidUriParts(http::uri::InvalidUriParts),
     Io(std::io::Error),
+    //IntConversion(std::num::TryFromIntError),
     RemoteException(crate::datatypes::RemoteException),
     HttpRedirect(u16, String),
     Timeout
@@ -62,6 +58,8 @@ impl Error {
             other => Err(Self::new(self.msg, other))
         }
     }
+    //pub fn timeout() -> Self { Self::new(None, Cause::Timeout) }
+    pub fn timeout_c(msg: &'static str) -> Self { Self::new(Some(Cow::Borrowed(msg)), Cause::Timeout) }
 }
 
 impl Display for Error {
@@ -77,9 +75,10 @@ impl Display for Error {
             Cause::HttpInvalidUri(e) => write!(f, "; caused by http::uri::InvalidUri: {}", e),
             Cause::HttpInvalidUriParts(e) => write!(f, "; caused by http::uri::InvalidUriParts: {}", e),
             Cause::Io(e) => write!(f, "; caused by IoError: {}", e),
+            //Cause::IntConversion(e) => write!(f, "; caused by std::num::TryFromIntError: {}", e),
             Cause::RemoteException(e) => write!(f, "; caused by RemoteException {}", e),
             Cause::HttpRedirect(code, location) => write!(f, "; caused by HTTP redirect {} {}", code, location),
-            Cause::Timeout  => write!(f, "; caused by Timeout"),
+            Cause::Timeout => write!(f, "; caused by Timeout"),
             Cause::None => Ok(())
         }
     }
@@ -97,6 +96,7 @@ impl std::error::Error for Error {
             Cause::HttpInvalidUri(e) => Some(e),
             Cause::HttpInvalidUriParts(e) => Some(e),
             Cause::Io(e) => Some(e),
+            //Cause::IntConversion(e) => Some(e),
             Cause::RemoteException(e) => Some(e),
             Cause::HttpRedirect(_, _) => None,
             Cause::Timeout => None,
@@ -179,11 +179,18 @@ error_conversions!{
     HttpInvalidUri(http::uri::InvalidUri),
     HttpInvalidUriParts(http::uri::InvalidUriParts),
     Io(std::io::Error),
+    //IntConversion(std::num::TryFromIntError),
     RemoteException(crate::datatypes::RemoteException)
 }
 
 impl From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
-        std::io::Error::new(std::io::ErrorKind::Other, e)
+        use std::io::{Error as IoError, ErrorKind as IoErrorKind };
+        match e {
+            Error { msg: None, cause: Cause::Io(io) } => io,
+            Error { msg: Some(m), cause: Cause::Timeout } => IoError::new(IoErrorKind::TimedOut, m), 
+            Error { msg: None, cause: Cause::Timeout } => IoError::from(IoErrorKind::TimedOut), 
+            other => IoError::new(std::io::ErrorKind::Other, other)
+        }
     }
 }
