@@ -140,3 +140,33 @@ impl Seek for ReadHdfsFile {
     }
 }
 
+
+/// HDFS file write object
+pub struct WriteHdfsFile {
+    cx: SyncHdfsClient,
+    path: String,
+}
+
+impl WriteHdfsFile {
+    pub fn create(cx: SyncHdfsClient, path: String, opts: CreateOptions) -> Result<WriteHdfsFile> {
+        cx.exec(cx.acx.create(&path, vec![], opts))?;
+        Ok(Self { cx, path })
+    }
+    pub fn append(cx: SyncHdfsClient, path: String) -> Result<WriteHdfsFile> {
+        Ok(Self { cx, path })
+    }
+}
+
+impl Write for WriteHdfsFile {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        //TODO this is apparently a performance killer. We need at least faster buffer copy, and ideally zero-copy
+        let mut b: Vec<u8> = Vec::with_capacity(buf.len());
+        b.extend(buf.iter());
+        let f = self.cx.acx.append(&self.path, b, AppendOptions::new());
+        let _ = self.cx.exec(f)?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}
