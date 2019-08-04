@@ -9,7 +9,7 @@ See [`tests/it.rs`](tests/it.rs) for usage examples.
 
 NOTE: This is a work in progress. Currently some basic functionality is implemented.
 
-NOTE: This is Alpha phase software. APIs will change towards version 1.0.
+NOTE: This is an Alpha phase software. APIs will change towards version 1.0.
 
 ## Building and testing
 
