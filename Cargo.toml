@@ -4,12 +4,16 @@ version = "0.1.0"
 authors = ["Valery Vybornov <vvybornov@gmail.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Hadoop WebHDFS client library"
+homepage = "https://github.com/vvvy/webhdfs-rs"
+#documentation = "..."
+repository = "https://github.com/vvvy/webhdfs-rs"
+readme = "README.md"
+keywords = ["hdfs", "webhdfs", "hadoop"]
+categories = ["filesystem", "asynchronous"]
+license = "Apache-2.0"
 
 [dependencies]
-
-#reqwest = "0.9"
-
 hyper = "0.12"
 hyper-tls = "0.3"
 #tokio-tls = "0.2"
