@@ -25,6 +25,7 @@ DISCLAIMER: the integration tests were developed on a Windows 10 machine (using 
 effort was applied to ensure Linux and OS X compatibility, it hasn't been tested there (yet). Sholud you notice any bugs and incompatibilies, please create an issue under the Github project.
 
 Steps:
+
     1. Launch the Bigtop cluster (ensure the supplemental configuration is applied)
     2. Run `itt.sh --prepare`
     3. Run `cargo test --test it -- --nocapture`

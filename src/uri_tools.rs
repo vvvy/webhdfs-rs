@@ -140,6 +140,7 @@ impl QueryEncoder {
             self.path_and_query.push(b'&');
         }
     }
+    /// add arbitrary string (encoding performed)
     pub fn add_pv(mut self, p: &str, v: &str) -> QueryEncoder {
         self.pfx();
         self.path_and_query.extend(uri_part_encoder_iter(p, false));
@@ -147,6 +148,7 @@ impl QueryEncoder {
         self.path_and_query.extend(uri_part_encoder_iter(v, false));
         self
     }
+    /// add 64-bit int
     pub fn add_pi(mut self, p: &str, v: i64) -> QueryEncoder {
         self.pfx();
         self.path_and_query.extend(uri_part_encoder_iter(p, false));
@@ -154,7 +156,22 @@ impl QueryEncoder {
         self.path_and_query.extend(format!("{}", v).bytes());
         self
     }
-    
+    /// add bool
+    pub fn add_pb(mut self, p: &str, v: bool) -> QueryEncoder {
+        self.pfx();
+        self.path_and_query.extend(uri_part_encoder_iter(p, false));
+        self.path_and_query.push(b'=');
+        self.path_and_query.extend(format!("{}", if v { "true" } else { "false" }).bytes());
+        self
+    }
+    /// add octal (hdfs permissions)
+    pub fn add_po(mut self, p: &str, v: u16) -> QueryEncoder {
+        self.pfx();
+        self.path_and_query.extend(uri_part_encoder_iter(p, false));
+        self.path_and_query.push(b'=');
+        self.path_and_query.extend(format!("{}{}{}", (v & 0o0700) >> 6, (v & 0o0070) >> 3, (v & 0o0007)).bytes());
+        self
+    }    
     pub fn result(self) -> Vec<u8> { self.path_and_query }
 
     #[allow(dead_code)]
