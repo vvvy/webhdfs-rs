@@ -1,16 +1,19 @@
+//! Synchronous WebHDFS client
+//! 
+//! The main client is `SyncHdfsClient`. It is neither `Send` nor `Sync`, so a separate instance must be created in 
+//! each thread accessing the API.
 
+use std::io::{Read, Write, Seek, SeekFrom, Result as IoResult, Error as IoError, ErrorKind as IoErrorKind};
+use std::convert::TryInto;
 use std::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
-
 use http::Uri;
-
 use tokio::runtime::current_thread::Runtime;
-use futures::Future;
-
+use futures::{Future, Stream};
 use crate::error::*;
 use crate::datatypes::*;
-use crate::async_client::HdfsClient;
+use crate::async_client::*;
 use crate::natmap::NatMap;
 
 /// HDFS Connection data, etc.
@@ -59,14 +62,6 @@ impl SyncHdfsClient {
 }
 
 
-
-
-
-//----------------------------------------------------------------------------------------------------
-use std::io::{Read, Write, Seek, SeekFrom, Result as IoResult, Error as IoError, ErrorKind as IoErrorKind};
-use std::convert::TryInto;
-use futures::Stream;
-
 /// HDFS file read object.
 /// 
 /// Note about position and offset types: we assume that all hdfs/webhdfs lengths and offsets are actually signed 64-bit integers, 
@@ -98,7 +93,7 @@ impl Read for ReadHdfsFile {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
 
         let buf_len: i64 = buf.len().try_into().map_err(|_| IoError::new(IoErrorKind::InvalidInput, "buffer too big"))?;
-        let mut s = self.cx.acx.file_read(&self.path, Some(self.pos), Some(buf_len), None);
+        let mut s = self.cx.acx.open(&self.path, OpenOptions::new().offset(self.pos).length(buf_len));
         let mut pos: usize = 0;
         
         loop {

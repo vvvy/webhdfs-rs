@@ -1,3 +1,5 @@
+//! Asynchronous WebHDFS client implementation
+
 use std::time::Duration;
 
 use http::{Uri, uri::Parts as UriParts};
@@ -32,9 +34,12 @@ impl Op {
     }
 }
 
+/// Operation argument
 #[derive(Debug)]
 enum OpArg {
+    /// `[&offset=<LONG>]`
     Offset(i64),
+    /// `[&length=<LONG>]`
     Length(i64),
     /// `[&buffersize=<INT>]`
     BufferSize(i32),
@@ -49,6 +54,7 @@ enum OpArg {
 }
 
 impl OpArg {
+    /// add to an url's query string
     fn add_to_url(&self, qe: QueryEncoder) -> QueryEncoder {
         match self {
             OpArg::Offset(v) => qe.add_pi("offset", *v),
@@ -62,6 +68,55 @@ impl OpArg {
     }
 }
 
+macro_rules! opt {
+    ($tag:ident, $tp:ty, $op_tag:ident) => {
+        pub fn $tag(mut self, v:$tp) -> Self { self.o.push(OpArg::$op_tag(v)); self }
+    };
+}
+
+macro_rules! opts {
+    // `[&offset=<LONG>]`
+    (offset) => { opt! { offset, i64, Offset } };
+    // `[&length=<LONG>]`
+    (length) => { opt! { length, i64, Length } };
+    // `[&overwrite=<true |false>]`
+    (overwrite) =>  { opt! { overwrite, bool, Overwrite } };
+    // `[&blocksize=<LONG>]`
+    (blocksize) => { opt! { blocksize, i64, Blocksize } };
+    // `[&replication=<SHORT>]`
+    (replication) => { opt! { replication, i16, Replication } };
+    // `[&permission=<OCTAL>]`
+    (permission) => { opt! { permission, u16, Permission } };
+    // `[&buffersize=<INT>]`
+    (buffersize) => { opt! { buffersize, i32, BufferSize } };
+}
+
+macro_rules! op_builder {
+    ($tag:ident => $($op:ident),+) => {
+        pub struct $tag { o: Vec<OpArg> }
+        impl $tag { 
+            pub fn new() -> Self { Self { o: vec![] } }
+            fn into(self) -> Vec<OpArg> { self.o }
+            $( opts!{$op} )+
+        }
+    };
+}
+
+//curl -i -L "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=OPEN
+//                    [&offset=<LONG>][&length=<LONG>][&buffersize=<INT>]"
+op_builder! { OpenOptions => offset, length, buffersize }
+
+//curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CREATE
+//           [&overwrite=<true |false>][&blocksize=<LONG>][&replication=<SHORT>]
+//           [&permission=<OCTAL>][&buffersize=<INT>]"
+op_builder! { CreateOptions => overwrite, blocksize, replication, permission, buffersize }
+
+//curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=APPEND[&buffersize=<INT>]"
+op_builder! { AppendOptions => buffersize }
+
+
+
+//--------------------------------------------------------
 /// Asynchronous WebHDFS client
 pub struct HdfsClient {
     entrypoint: UriParts,
@@ -109,64 +164,46 @@ impl HdfsClient {
 
     pub(crate) fn default_timeout(&self) -> &Duration { &self.default_timeout }
 
+    /// Get directory listing
     pub fn dir(&self, path: &str) -> impl Future<Item=ListStatusResponse, Error=Error> + Send {
         let natmap = self.natmap();
         self.uri_result(path, Op::LISTSTATUS, vec![])
             .and_then(|uri| HttpxClient::new_get_json(uri, natmap))
     }
 
+    /// Get status
     pub fn stat(&self, path: &str) -> impl Future<Item=FileStatusResponse, Error=Error> + Send {
         let natmap = self.natmap();
         self.uri_result(path, Op::GETFILESTATUS, vec![])
             .and_then(|uri| HttpxClient::new_get_json(uri, natmap))
     }
 
-    pub fn file_read(&self, path: &str, offset: Option<i64>, length: Option<i64>, buffersize: Option<i32>) 
+    /// Read file data
+    pub fn open(&self, path: &str, opts: OpenOptions) 
     -> impl Stream<Item=hyper::body::Chunk, Error=Error> + Send {
         let natmap = self.natmap();
-        let args = vec![
-            offset.map(|v| OpArg::Offset(v)), 
-            length.map(|v| OpArg::Length(v)), 
-            buffersize.map(|v| OpArg::BufferSize(v))
-            ].into_iter().flatten().collect();
-        self.uri_result(path, Op::OPEN, args)
+        self.uri_result(path, Op::OPEN, opts.into())
             .map(|uri| HttpxClient::new_get_binary(uri, natmap))
             .flatten_stream()
     }
 
     /// Create a HDFS file and write some data
-    pub fn file_create(&self, path: &str, 
-        data: Vec<u8>, 
-        overwrite: Option<bool>,
-        blocksize: Option<i64>,
-        replication: Option<i16>,
-        permission: Option<u16>, 
-        buffersize: Option<i32>) 
+    pub fn create(&self, path: &str, data: Vec<u8>, opts: CreateOptions) 
     -> impl Future<Item=(), Error=Error> + Send {
         //curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CREATE
         //           [&overwrite=<true |false>][&blocksize=<LONG>][&replication=<SHORT>]
         //           [&permission=<OCTAL>][&buffersize=<INT>]"
         let natmap = self.natmap();
-        let args = vec![
-            overwrite.map(|v| OpArg::Overwrite(v)),
-            blocksize.map(|v| OpArg::Blocksize(v)), 
-            replication.map(|v| OpArg::Replication(v)), 
-            permission.map(|v| OpArg::Permission(v)), 
-            buffersize.map(|v| OpArg::BufferSize(v))
-            ].into_iter().flatten().collect();
-        self.uri_result(path, Op::CREATE, args)
+        self.uri_result(path, Op::CREATE, opts.into())
             .and_then(|uri| HttpxClient::new_post_binary(uri, natmap, data))
     }
 
-    /// Create a HDFS file and write some data
-    pub fn file_append(&self, path: &str, data: Vec<u8>, buffersize: Option<i32>) 
+    /// Append to a HDFS file
+    pub fn append(&self, path: &str, data: Vec<u8>, opts: AppendOptions) 
     -> impl Future<Item=(), Error=Error> + Send {
         //curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=APPEND[&buffersize=<INT>]"
         let natmap = self.natmap();
-        let args = vec![
-            buffersize.map(|v| OpArg::BufferSize(v))
-            ].into_iter().flatten().collect();
-        self.uri_result(path, Op::APPEND, args)
+        self.uri_result(path, Op::APPEND, opts.into())
             .and_then(|uri| HttpxClient::new_post_binary(uri, natmap, data))
     }
 }
