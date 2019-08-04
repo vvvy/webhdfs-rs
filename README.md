@@ -9,9 +9,9 @@ See [`tests/it.rs`](tests/it.rs) for usage examples.
 
 NOTE: This is a work in progress. Currently some basic functionality is implemented.
 
-NOTE: This is Alpha phase software, and thus is unstable. APIs will change towards version 1.0.
+NOTE: This is Alpha phase software. APIs will change towards version 1.0.
 
-## Building and tesing
+## Building and testing
 
 ```
 cargo test --lib -- --nocapture

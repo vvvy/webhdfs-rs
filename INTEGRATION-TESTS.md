@@ -1,9 +1,8 @@
 # `webhdfs` integration tests
 
-Intergation tests are set up with Apache Bigtop provisioner 3-node cluster. See comments in `itt.sh` for details.
+Intergation tests are set up with Apache Bigtop provisioner 3-node cluster. See comments in [`itt.sh`](itt.sh) for details.
 
-DISCLAIMER: the integration tests were developed on a Windows 10 machine (using Docker Desktop and both Cygwin and WSL). While best
-effort was applied to ensure Linux and OS X compatibility, it hasn't been tested there (yet). Sholud you notice any bugs and incompatibilies, please create an issue under the Github project.
+DISCLAIMER: the integration tests were developed on a Windows 10 machine (using Docker Desktop and both Cygwin and WSL). While the best effort was made to ensure Linux and OS X compatibility, the test scripts have not been tested there (yet), and may contain bugs. Sholud you notice any bugs and incompatibilies, please create an issue in the webhdfs Github project.
 
 Steps:
 
