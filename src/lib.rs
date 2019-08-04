@@ -1,9 +1,11 @@
+//! Hadoop WebHDFS API for Rust
+
 #[macro_use] 
 mod error;
 mod rest_client;
-mod datatypes;
 mod natmap;
 mod uri_tools;
+pub mod datatypes;
 pub mod async_client;
 pub mod sync_client;
 

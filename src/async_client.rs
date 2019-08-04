@@ -12,7 +12,7 @@ use crate::datatypes::*;
 
 
 #[derive(Debug)]
-pub enum Op {
+enum Op {
     LISTSTATUS,
     GETFILESTATUS,
     OPEN
@@ -29,7 +29,7 @@ impl Op {
 }
 
 #[derive(Debug)]
-pub enum OpArg {
+enum OpArg {
     Offset(i64),
     Length(i64),
     BufferSize(i32)
@@ -45,6 +45,7 @@ impl OpArg {
     }
 }
 
+/// Asynchronous WebHDFS client
 pub struct HdfsClient {
     entrypoint: UriParts,
     natmap: NatMapPtr,
