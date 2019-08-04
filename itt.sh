@@ -33,6 +33,11 @@
 #    (if downloaded, the test file is deleted from './test-data' after preparation).
 #
 # See 'itt.sh --help' for usage details
+#
+#known-bugs-and-caveats:
+# 1. If the provisioned containers are stopped and then started, Namenode and Resource Manager services are unable to bind to
+#    some ports (50070 and ?) and terminate abnormally upon startup. This behavior was detected under Windows 
+#    (Docker Desktop). 
 
 
 TESTFILE=soc-pokec-relationships.txt
@@ -177,13 +182,20 @@ upload() {
     c-exec 1 hdfs dfs -put -f $C_TESTDATA_DIR/$TESTFILE $HDFS_DIR
 }
 
+prepare-hdfs-part() {
+    create-source &&
+    create-natmap &&
+    upload &&
+    drop-source
+}
+
 prepare() {
     mkdir -p $TESTDATA_DIR
     if [ "$1" == "--force" -o ! -f $TESTDATA_DIR/.prepared ] ; then 
         create-source &&
         create-shasums &&
-        create-natmap &&
         create-args &&
+        create-natmap &&
         upload &&
         drop-source &&
         > $TESTDATA_DIR/.prepared
@@ -246,8 +258,8 @@ case "$1" in
         echo "    at the preparation step above."
         echo $0 --create-natmap
         echo "    Only creates NAT mapping file."
-        echo $0 --upload
-        echo "    Only uploads the testfile."
+        echo $0 --prepare-hdfs-part
+        echo "    Does partial preparation for just the Bigtop/HDFS part. Typically used after re-creating bigtop containers."
         ;;
     --prepare)
         prepare $2
@@ -255,14 +267,8 @@ case "$1" in
     --validate)
         validate
         ;;
-    --create-natmap)
-        create-natmap
-        ;;
-    --create-args)
-        create-args
-        ;;
-    --upload)
-        upload
+    --prepare-hdfs-part)
+        prepare-hdfs-part
         ;;
     *)
         echo Invalid option $1 >&2

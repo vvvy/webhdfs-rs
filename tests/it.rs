@@ -1,6 +1,6 @@
 //Integration test for webhdfs-rs
 
-use webhdfs::*;
+use webhdfs::{*, sync_client::*};
 //use ReadHdfsFile;
 
 use std::fs::{File, read};
@@ -44,7 +44,7 @@ e=entrypoint, s=source, p=program, n=natmap);
 
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
     let entrypoint_uri = "http://".to_owned() + &entrypoint;
-    let cx = HdfsContext::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"), nm).expect("cannot HdfsContext::new");
+    let cx = SyncHdfsClient::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"), nm).expect("cannot HdfsContext::new");
 
     let (source_dir, source_sfn) = source.split_at(source.rfind('/').expect("source does not contain '/'"));
     let (_, source_fn) = source_sfn.split_at(1);
@@ -57,15 +57,13 @@ e=entrypoint, s=source, p=program, n=natmap);
     // modification_time: 1564409849727, owner: "root", path_suffix: "soc-pokec-relationships.txt", 
     // permission: "644", replication: 3, type_: "FILE" 
     //}] } })
-    let dir_resp = dir(&cx, source_dir);
+    let dir_resp = cx.dir(source_dir);
     println!("Dir: {:?}", dir_resp);
     assert_eq!(source_fn, dir_resp.unwrap().file_statuses.file_status[0].path_suffix);
 
-    let stat_resp = stat(&cx, &source);
+    let stat_resp = cx.stat(&source);
     println!("Stat: {:?}", stat_resp);
     assert_eq!(size, stat_resp.unwrap().file_status.length);
-
-
 
     //Parse program
     #[derive(Debug)]
