@@ -16,13 +16,13 @@
 #
 #operation:
 # Read test:
-# The read test consists of a sequence of reads and seeks against a testfile, set up by PROGRAM below.
+# The read test consists of a sequence of reads and seeks against a testfile, set up by READSCRIPT below.
 # The social networking graph data file 'soc-pokec-relationships.txt', available on SNAP, is used as a testflle (any file, large enough, 
 # may be used; recommended size is 200-400M).
-# During preparation, SHA-512 checksums are pre-calculated for each of r: chunks set up by PROGRAM (chunks are extracted by dd utility).
-# The program under test is expected to execute the PROGRAM below (actually, POUT) by doing seeks and reads as requested.
-# Upon each read, the program reads from the testfile (HDFS) then writes the content read to a file specified by 3rd part of POUT item.
-# Finally, checksums for newly written chunks are validated against pre-calculated checksums.
+# During preparation, SHA-512 checksums are pre-calculated for each of r: chunks set up by READSCRIPT (chunks are extracted by dd utility).
+# The program under test is expected to execute the READSCRIPT below (actually, READSCRIPTOUT) by doing seeks and reads as requested.
+# Upon each read, the program reads from the testfile (HDFS) then writes the content read to a file specified by 3rd part of READSCRIPTOUT 
+# item. Finally, checksums for newly written chunks are validated against pre-calculated checksums.
 #
 #hooks:
 # 1. place all local settings in './itt-config.sh' and make it 'chmod a+x'
@@ -33,15 +33,11 @@
 #    (if downloaded, the test file is deleted from './test-data' after preparation).
 #
 # See 'itt.sh --help' for usage details
-#
-#known-bugs-and-caveats:
-# 1. If the provisioned containers are stopped and then started, Namenode and Resource Manager services are unable to bind to
-#    some ports (50070 and ?) and terminate abnormally upon startup. This behavior was detected under Windows 
-#    (Docker Desktop). 
 
 
 TESTFILE=soc-pokec-relationships.txt
-PROGRAM=(r:128m s:0 r:1m r:128m)
+READSCRIPT=(r:128m s:0 r:1m r:128m)
+WRITE_SCRIPT=(0 10% 50% 70%)
 
 #local directory where test data is maintained
 TESTDATA_DIR=./test-data
@@ -64,14 +60,19 @@ grep -q Microsoft /proc/version && { IS_WSL=true ; DRIVES_CONTAINER=/mnt ; }
 if [ -x ./itt-config.sh ]; then . ./itt-config.sh ; fi
 
 LOCALHOST=localhost
+TESTFILE_W=$TESTFILE.w
 SOURCE=$TESTDATA_DIR/$TESTFILE
 SHASUMS=$TESTDATA_DIR/shasums
+CHECKSUMFILE=$TESTDATA_DIR/hdfs-checksum
 NATMAP=$TESTDATA_DIR/natmap
 ENTRYPOINT=$TESTDATA_DIR/entrypoint
-PROGRAMFILE=$TESTDATA_DIR/program
+READSCRIPTFILE=$TESTDATA_DIR/readscript
+WRITESCRIPTFILE=$TESTDATA_DIR/writescript
 SIZEFILE=$TESTDATA_DIR/size
 SOURCEPATHFILE=$TESTDATA_DIR/source
+TARGETPATHFILE=$TESTDATA_DIR/target
 SEGFILE_PREFIX=$TESTDATA_DIR/seg-
+WSEGFILE_PREFIX=$TESTDATA_DIR/wseg-
 
 create-source-cmd() {
     if [ -x ./create-source-script ]
@@ -101,12 +102,12 @@ drop-source() {
     fi
 }
 
-
-#handles 'k' and 'm' suffixes as multipliers
-ival() {
+#handles 'k', 'm' and '%'' suffixes
+pval() {
     case $1 in
         *k) echo $((${1%%m} * 1024)) ;;
         *m) echo $((${1%%m} * 1024 * 1024)) ;;
+        *%) echo $((${1%%%} * $2 / 100)) ;;
         *) echo $1 ;;
     esac
 }
@@ -114,22 +115,23 @@ ival() {
 #extracts pieces from $1 and calcuates sha512sum on them
 #the result is 'shasums' file in the CWD
 create-shasums() {
+    SZ=`stat -c "%s" $SOURCE`
     POS=0
     FN=0
     > $SHASUMS
-    for item in ${PROGRAM[*]} 
+    for item in ${READSCRIPT[*]} 
     do 
         case $item in
         s:*)
             W=${item##s:}
-            V=`ival $W`
+            V=`pval $W $SZ`
             #echo Seek=$W/$V
             POS=$V
             ;;
             
         r:*)
             W=${item##r:}
-            V=`ival $W`
+            V=`pval $W $SZ`
             FNAME=$SEGFILE_PREFIX$FN
             #echo Read $W/$V @$POS =\>$FNAME
             dd if=$SOURCE of=$FNAME count=$V skip=$POS iflag=count_bytes,skip_bytes
@@ -144,6 +146,18 @@ create-shasums() {
             exit 2
             ;;
         esac
+    done
+}
+
+#creates write test segments
+create-wsegs() {
+    SZ=`stat -c "%s" $SOURCE`
+    for i in ${!WRITE_SCRIPT[*]} 
+    do
+        pos=`pval ${WRITE_SCRIPT[$i]} $SZ`
+        npos=`pval ${WRITE_SCRIPT[$(($i + 1))]:-$SZ} $SZ`
+        len=$((npos - pos))
+        dd if=$SOURCE of=$WSEGFILE_PREFIX$i count=$len skip=$pos iflag=count_bytes,skip_bytes
     done
 }
 
@@ -179,16 +193,59 @@ create-natmap() {
     done       
 }
 
-#put test file to HDFS
+create-args() {
+    FN=0
+    for i in ${!READSCRIPT[*]} 
+    do 
+        case ${READSCRIPT[$i]} in
+        s:*)
+            READSCRIPTOUT[$i]=${READSCRIPT[$i]}
+            ;;          
+        r:*)
+            READSCRIPTOUT[$i]=${READSCRIPT[$i]}:$SEGFILE_PREFIX$FN
+            FN=$(($FN + 1))
+            ;;          
+        *)
+            echo Invalid program item '$item' >&2
+            exit 2
+            ;;
+        esac
+    done
+
+    for i in ${!WRITE_SCRIPT[*]} 
+    do
+        WRITESCRIPTOUT[$i]=$WSEGFILE_PREFIX$i
+    done
+ 
+    echo -n ${READSCRIPTOUT[*]} > $READSCRIPTFILE
+    echo -n ${WRITESCRIPTOUT[*]} > $WRITESCRIPTFILE
+    echo -n $HDFS_DIR/$TESTFILE > $SOURCEPATHFILE
+    echo -n $HDFS_DIR/$TESTFILE_W > $TARGETPATHFILE
+    echo -n `stat -c "%s" $SOURCE` > $SIZEFILE
+}
+
+
+#put the test file to HDFS and a checksum file locally
 upload() {
     c-exec 1 hdfs dfs -mkdir -p $HDFS_DIR
     c-exec 1 hdfs dfs -put -f $C_TESTDATA_DIR/$TESTFILE $HDFS_DIR
+    c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE > $CHECKSUMFILE
+}
+
+clean-hdfs-w() {
+    c-exec 1 hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE_W
+}
+
+clean-hdfs() {
+    c-exec 1 hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE
+    clean-hdfs-w
 }
 
 prepare-hdfs-part() {
     create-source &&
     create-natmap &&
     upload &&
+    clean-hdfs-w &&
     drop-source
 }
 
@@ -197,46 +254,24 @@ prepare() {
     if [ "$1" == "--force" -o ! -f $TESTDATA_DIR/.prepared ] ; then 
         create-source &&
         create-shasums &&
+        create-wsegs &&
         create-args &&
         create-natmap &&
         upload &&
+        clean-hdfs-w &&
         drop-source &&
         > $TESTDATA_DIR/.prepared
     fi
 }
 
-unprepare() {
-    rm -f $TESTDATA_DIR/.prepared $SHASUMS $NATMAP $ENTRYPOINT $PROGRAMFILE $SIZEFILE $SEGFILE_PREFIX*
+cleanup() {
+    rm -f $TESTDATA_DIR/.prepared $SHASUMS $CHECKSUMFILE $NATMAP $ENTRYPOINT $SIZEFILE 
+    rm -f $SOURCEPATHFILE $READSCRIPTFILE $TARGETPATHFILE $WRITESCRIPTFILE
+    rm -f $SEGFILE_PREFIX* $WSEGFILE_PREFIX*
+    clean-hdfs
 }
 
-create-args() {
-    I=0
-    FN=0
-    for item in ${PROGRAM[*]} 
-    do 
-        case $item in
-        s:*)
-            POUT[$I]=$item
-            ;;          
-        r:*)
-            POUT[$I]=$item:$SEGFILE_PREFIX$FN
-            FN=$(($FN + 1))
-            ;;          
-        *)
-            echo Invalid program item '$item' >&2
-            exit 2
-            ;;
-        esac
-        I=$(($I + 1))
-    done
- 
-    #echo --entrypoint=\"`cat $ENTRYPOINT`\" --source=\"$HDFS_DIR/$TESTFILE\"--program=\"${POUT[*]}\"
-    echo -n ${POUT[*]} > $PROGRAMFILE
-    echo -n $HDFS_DIR/$TESTFILE > $SOURCEPATHFILE
-    echo -n `stat -c "%s" $SOURCE` > $SIZEFILE
-}
-
-validate() {
+validate-read() {
     if sha512sum -c $SHASUMS
     then
         rm -f $SEGFILE_PREFIX*
@@ -244,6 +279,32 @@ validate() {
         echo Checksum mismatch >&2
         exit 2
     fi
+}
+
+validate-write() {
+    local orig=(`cat $CHECKSUMFILE`)
+    local chal=(`c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE_W`)
+    if [ "${orig[1]}" == "${chal[1]}" -a "${orig[2]}" == "${chal[2]}" ]
+    then
+        echo Write checksums Ok
+        c-exec 1 hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE_W
+    else
+        echo HDFS Checksum mismatch >&2
+        echo Orig: ${orig[*]} >&2
+        echo Chal: ${chal[*]} >&2
+        exit 2
+    fi       
+}
+
+validate() {
+    validate-read && 
+    validate-write
+}
+
+run-test() {
+    prepare &&
+    cargo test --test it -- --nocapture &&
+    validate
 }
 
 cd `dirname $0`
@@ -260,22 +321,27 @@ case "$1" in
         echo Usage
         echo $0 --prepare [--force]
         echo "    Uploads the testfile to hdfs, calculates checksums and other necessary data."
+        echo $0 --cleanup
+        echo "    Cleans up everything."
         echo $0 --validate
         echo "    Validates checksums of the files generated by the program being tested, against the reference checksums generated"
         echo "    at the preparation step above."
-        echo $0 --create-natmap
-        echo "    Only creates NAT mapping file."
+        echo $0 --run
+        echo "    Does --prepare, then runs the test with cargo, then does --validate"       
         echo $0 --prepare-hdfs-part
         echo "    Does partial preparation for just the Bigtop/HDFS part. Typically used after re-creating bigtop containers."
         ;;
     --prepare)
         prepare $2
         ;;
-    --unprepare)
-        unprepare
+    --cleanup)
+        cleanup
         ;;
     --validate)
         validate
+        ;;
+    --run)
+        run-test
         ;;
     --prepare-hdfs-part)
         prepare-hdfs-part

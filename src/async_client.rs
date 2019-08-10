@@ -2,14 +2,14 @@
 
 use std::time::Duration;
 
-use http::{Uri, uri::Parts as UriParts};
+use http::{Uri, uri::Parts as UriParts, Method};
 use futures::{Future, Stream};
 
 use crate::uri_tools::*;
 use crate::natmap::{NatMap, NatMapPtr};
 
 use crate::error::*;
-use crate::rest_client::HttpxClient;
+use crate::rest_client::HttpyClient;
 use crate::datatypes::*;
 use crate::op::*;
 
@@ -19,7 +19,9 @@ use crate::op::*;
 pub struct HdfsClient {
     entrypoint: UriParts,
     natmap: NatMapPtr,
-    default_timeout: Duration
+    default_timeout: Duration,
+    user_name: Option<String>,
+    dt: Option<String>
 }
 
 /// Builder for `HdfsClient`
@@ -33,7 +35,9 @@ impl HdfsClientBuilder {
         Self { c: HdfsClient {
                 entrypoint: entrypoint.into_parts(),
                 natmap: NatMapPtr::empty(),
-                default_timeout: Duration::from_secs(Self::DEFAULT_TIMEOUT_S)
+                default_timeout: Duration::from_secs(Self::DEFAULT_TIMEOUT_S),
+                user_name: None,
+                dt: None
         }  } 
     }
     pub fn natmap(self, natmap: NatMap) -> Self {
@@ -41,6 +45,12 @@ impl HdfsClientBuilder {
     }
     pub fn default_timeout(self, timeout: Duration) -> Self {
         Self { c: HdfsClient { default_timeout: timeout, ..self.c } }
+    }
+    pub fn user_name(self, user_name: String) -> Self {
+        Self { c: HdfsClient { user_name: Some(user_name), ..self.c } }
+    }
+    pub fn delegation_token(self, dt: String) -> Self {
+        Self { c: HdfsClient { dt: Some(dt), ..self.c } }
     }
     pub fn build(self) -> HdfsClient { self.c }
 }
@@ -55,10 +65,12 @@ impl HdfsClient {
         if let Some(scheme) = &self.entrypoint.scheme { b.scheme(scheme.clone()); }
         if let Some(authority) = &self.entrypoint.authority { b.authority(authority.clone()); }
 
-        let q0 = PathEncoder::new(Self::SVC_MOUNT_POINT).extend(file_path).query();
-        let q1 = q0.add_pv("op", op.op_string());
-        let q2 = args.iter().fold(q1, |q, s| s.add_to_url(q));
-        let p = q2.result();
+        let q = PathEncoder::new(Self::SVC_MOUNT_POINT).extend(file_path).query();
+        let q = if let Some(user) = &self.user_name { q.add_pv("user.name", user) } else { q };
+        let q = if let Some(dt) = &self.dt { q.add_pv("delegation", dt) } else { q };
+        let q = q.add_pv("op", op.op_string());
+        let q = args.iter().fold(q, |q, s| s.add_to_url(q));
+        let p = q.result();
 
         b.path_and_query(&p as &[u8]).build()
         .aerr_f(|| format!("Could not build URI: file_path={}, op={:?}, args={:?}", file_path, op, args))
@@ -75,14 +87,14 @@ impl HdfsClient {
     pub fn dir(&self, path: &str) -> impl Future<Item=ListStatusResponse, Error=Error> + Send {
         let natmap = self.natmap();
         self.uri_result(path, Op::LISTSTATUS, vec![])
-            .and_then(|uri| HttpxClient::new_get_json(uri, natmap))
+            .and_then(|uri| HttpyClient::new(uri, natmap).get_json())
     }
 
     /// Get status
     pub fn stat(&self, path: &str) -> impl Future<Item=FileStatusResponse, Error=Error> + Send {
         let natmap = self.natmap();
         self.uri_result(path, Op::GETFILESTATUS, vec![])
-            .and_then(|uri| HttpxClient::new_get_json(uri, natmap))
+            .and_then(|uri| HttpyClient::new(uri, natmap).get_json())
     }
 
     /// Read file data
@@ -90,7 +102,7 @@ impl HdfsClient {
     -> impl Stream<Item=hyper::body::Chunk, Error=Error> + Send {
         let natmap = self.natmap();
         self.uri_result(path, Op::OPEN, opts.into())
-            .map(|uri| HttpxClient::new_get_binary(uri, natmap))
+            .map(|uri| HttpyClient::new(uri, natmap).get_binary())
             .flatten_stream()
     }
 
@@ -102,7 +114,7 @@ impl HdfsClient {
         //           [&permission=<OCTAL>][&buffersize=<INT>]"
         let natmap = self.natmap();
         self.uri_result(path, Op::CREATE, opts.into())
-            .and_then(|uri| HttpxClient::new_post_binary(uri, natmap, data))
+            .and_then(|uri| HttpyClient::new(uri, natmap).post_binary(Method::PUT, data))
     }
 
     /// Append to a HDFS file
@@ -111,6 +123,6 @@ impl HdfsClient {
         //curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=APPEND[&buffersize=<INT>]"
         let natmap = self.natmap();
         self.uri_result(path, Op::APPEND, opts.into())
-            .and_then(|uri| HttpxClient::new_post_binary(uri, natmap, data))
+            .and_then(|uri| HttpyClient::new(uri, natmap).post_binary(Method::POST, data))
     }
 }

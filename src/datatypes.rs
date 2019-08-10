@@ -17,6 +17,12 @@ Transfer-Encoding: chunked
 */
 
 #[derive(Debug, Deserialize)]
+pub struct RemoteExceptionResponse {
+    #[serde(rename="RemoteException")]
+    pub remote_exception: RemoteException
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RemoteException {
     pub exception: String,
     #[serde(rename="javaClassName")]

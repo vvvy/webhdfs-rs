@@ -8,7 +8,7 @@ use hyper::{
 use hyper_tls::HttpsConnector;
 use mime::Mime;
 use crate::error::*;
-use crate::datatypes::RemoteException;
+use crate::datatypes::RemoteExceptionResponse;
 use crate::natmap::NatMapPtr;
 
 
@@ -81,8 +81,10 @@ fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Box<dyn Future<
             if match_mimes(&ct, RCT::JSON) {
                 Box::new(
                     concat.and_then(move |body| 
-                        serde_json::from_slice::<RemoteException>(&body)
-                            .aerr_f(|| format!("JSON err deseriaization error, recovered text: '{}'", String::from_utf8_lossy(body.as_ref())))
+                        serde_json::from_slice::<RemoteExceptionResponse>(&body)
+                        .aerr_f(|| format!("JSON err deseriaization error, recovered text: '{}'", String::from_utf8_lossy(body.as_ref())))
+                        .map(|er| er.remote_exception)
+
                     ).and_then(|ex| 
                         futures::future::err(ex.into())
                     )
@@ -168,13 +170,13 @@ impl Httpx {
     }
 }
 
-pub struct HttpxClient {
+struct HttpxClient {
     endpoint: Httpx,
 }
 
 impl HttpxClient
 {
-    pub fn new(uri: &Uri) -> Result<HttpxClient> {
+    fn new(uri: &Uri) -> Result<HttpxClient> {
         Httpx::new(uri).map(|p| HttpxClient { endpoint: p })
     }
 
@@ -212,11 +214,20 @@ impl HttpxClient
             Err(e) => Box::new(futures::future::err(e))
         }
     }
+}
+
+
+pub struct HttpyClient {
+    uri: Uri, 
+    natmap: NatMapPtr
+}
+
+impl HttpyClient {
+    pub fn new(uri: Uri, natmap: NatMapPtr) -> Self { Self { uri, natmap } }
 
     #[inline]
-    fn new_request_with_redirect(
-        uri: Uri, 
-        natmap: NatMapPtr, 
+    fn request_with_redirect(
+        self, 
         rf0: impl FnOnce(Uri) -> Box<Future<Item=Response<Body>, Error=Error> + Send> + Send,
         rf1: impl FnOnce(Uri) -> Box<Future<Item=Response<Body>, Error=Error> + Send> + Send
         ) -> impl Future<Item=Response<Body>, Error=Error> + Send {
@@ -241,37 +252,39 @@ impl HttpxClient
                 }
             }
         }
+        let Self { uri, natmap } = self;
         rf0(uri)
             .and_then(|r| redirect_filter(r))
             .then(|r| handle_redirect(r, natmap, rf1))
     }
     
-    pub fn new_get_json<R>(uri: Uri, natmap: NatMapPtr) -> impl Future<Item=R, Error=Error> + Send
+    pub fn get_json<R>(self) -> impl Future<Item=R, Error=Error> + Send
         where R: serde::de::DeserializeOwned + Send + 'static {
         
-        let f0 = Self::new_request_with_redirect(uri, natmap, 
-            |uri| Self::new_get_like(uri, Method::GET), 
-            |uri| Self::new_get_like(uri, Method::GET)
+        let f0 = self.request_with_redirect( 
+            |uri| HttpxClient::new_get_like(uri, Method::GET), 
+            |uri| HttpxClient::new_get_like(uri, Method::GET)
         );
         let f1 = ensure_ct(RCT::JSON, f0);
         let f2 = extract_json(f1);
         f2
     }
 
-    pub fn new_get_binary(uri: Uri, natmap: NatMapPtr) -> impl Stream<Item=Chunk, Error=Error> + Send {
-        let f0 = Self::new_request_with_redirect(uri, natmap, 
-            |uri| Self::new_get_like(uri, Method::GET), 
-            |uri| Self::new_get_like(uri, Method::GET)
+    pub fn get_binary(self) -> impl Stream<Item=Chunk, Error=Error> + Send {
+        let f0 = self.request_with_redirect( 
+            |uri| HttpxClient::new_get_like(uri, Method::GET), 
+            |uri| HttpxClient::new_get_like(uri, Method::GET)
         );
         let f1 = ensure_ct(RCT::Binary, f0);
         let f2 = extract_binary(f1);
         f2
     }
 
-    pub fn new_post_binary(uri: Uri, natmap: NatMapPtr, data: Vec<u8>) -> impl Future<Item=(), Error=Error> + Send {
-        let f0 = Self::new_request_with_redirect(uri, natmap, 
-            |uri| Self::new_get_like(uri, Method::POST), 
-            move |uri| Self::new_post_like(uri, Method::POST, data)
+    pub fn post_binary(self, method: Method, data: Vec<u8>) -> impl Future<Item=(), Error=Error> + Send {
+        let method1 = method.clone();
+        let f0 = self.request_with_redirect(
+            |uri| HttpxClient::new_get_like(uri, method1), 
+            move |uri| HttpxClient::new_post_like(uri, method, data)
         );
         let f1 = ensure_ct(RCT::None, f0);
         let f2 = extract_empty(f1);
@@ -305,7 +318,7 @@ mod client_tests {
     #[test]
     fn test_get_s() {
         let uri = "https://newton.now.sh/factor/x%5E2-1".parse().unwrap();
-        let res = f_wait(HttpxClient::new_get_json::<R>(uri, NatMapPtr::empty())).unwrap();
+        let res = f_wait(HttpyClient::new(uri, NatMapPtr::empty()).get_json::<R>()).unwrap();
         assert_eq!(res , R {
             operation: "factor".to_string(),
             expression: "x^2-1".to_string(),

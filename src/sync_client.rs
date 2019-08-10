@@ -39,6 +39,12 @@ impl SyncHdfsClientBuilder {
     pub fn default_timeout(self, timeout: Duration) -> Self {
         Self { a: self.a.default_timeout(timeout), ..self }
     }
+    pub fn user_name(self, user_name: String) -> Self {
+        Self { a: self.a.user_name(user_name), ..self }
+    }
+    pub fn delegation_token(self, dt: String) -> Self {
+        Self { a: self.a.delegation_token(dt), ..self }
+    }
     pub fn build(self) -> Result<SyncHdfsClient> {
          Ok(SyncHdfsClient { 
             acx: Rc::new(self.a.build()), 

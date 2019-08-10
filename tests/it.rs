@@ -11,27 +11,26 @@ use std::convert::TryInto;
 
 
 #[test]
-fn test_read() {
+fn webhdfs_test() {
     println!("Integration test -- start");
 
-    let do_scripts = if let Ok(..) = std::env::var("WEBHDFS_BYPASS_SCRIPTS") { false } else { true };
-
-    fn run_script(cmdline: &str, msg: &'static str) {
-        use std::process::Command;
-        assert!(Command::new("bash").arg("-c").arg(cmdline).status().expect("could not run bash").success(), msg)
-    }
-
-    if do_scripts { run_script("./itt.sh --prepare", "Could not prepare"); }
+    //let do_itt = if let Ok(..) = std::env::var("WEBHDFS_BYPASS_ITT") { false } else { true };
+    //fn run_shell(cmdline: &str, msg: &'static str) {
+    //    use std::process::Command;
+    //    assert!(Command::new("bash").arg("-c").arg(cmdline).status().expect("could not run bash").success(), msg)
+    //}
+    //if do_itt { run_shell("./itt.sh --prepare", "Could not prepare"); }
 
     fn file_as_string(path: &str) -> String {
         String::from_utf8_lossy(&read(path).expect("cannot file-as-stirng")).to_owned().to_string()
     }
 
     let entrypoint = file_as_string("./test-data/entrypoint");
-    let program = file_as_string("./test-data/program");
+    let readscript = file_as_string("./test-data/readscript");
+    let writescript = file_as_string("./test-data/writescript");
     let source = file_as_string("./test-data/source");
+    let target = file_as_string("./test-data/target");
     let size = file_as_string("./test-data/size").parse::<i64>().unwrap();
-
 
     let f = File::open("./test-data/natmap").expect("cannot open natmap");
     let f = BufReader::new(f);
@@ -48,14 +47,17 @@ fn test_read() {
     println!("
 entrypoint='{e}'
 source='{s}'
-program='{p}'
+readscript='{r}'
+target='{t}'
+writescript='{w}'
 natmap={n:?}", 
-e=entrypoint, s=source, p=program, n=natmap);
+e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap);
 
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
     let entrypoint_uri = "http://".to_owned() + &entrypoint;
     let cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
         .natmap(nm)
+        .user_name("root".to_owned())
         .build()
         .expect("cannot HdfsContext::new");
 
@@ -64,6 +66,7 @@ e=entrypoint, s=source, p=program, n=natmap);
 
     //------------------------------------------------
     //Test directory listing
+    println!("Test dir and stat");
 
     //Ok(ListStatusResponse { file_statuses: FileStatuses { file_status: [FileStatus { 
     // access_time: 1564409836087, block_size: 134217728, group: "hadoop", length: 423941508, 
@@ -77,6 +80,8 @@ e=entrypoint, s=source, p=program, n=natmap);
     let stat_resp = cx.stat(&source);
     println!("Stat: {:?}", stat_resp);
     assert_eq!(size, stat_resp.unwrap().file_status.length);
+
+    println!("Read test");
 
     //Parse program
     #[derive(Debug)]
@@ -95,7 +100,7 @@ e=entrypoint, s=source, p=program, n=natmap);
         }
     }
 
-    let p = program.split(' ').filter(|e| !e.is_empty()).map(|s|{
+    let p = readscript.split(' ').filter(|e| !e.is_empty()).map(|s|{
         let mut i = s.split(':');
         let optype = i.next().unwrap();
         let arg = parse_size(i.next().unwrap());
@@ -108,20 +113,22 @@ e=entrypoint, s=source, p=program, n=natmap);
 
     //allocate and initialize a large master buffer
     let master_buffer_size = p.iter().map(|w| if let Op::Read(len, _) = w { *len } else { 0 }).max().unwrap().try_into().unwrap();
+    print!("alloc_mb(len={})...", master_buffer_size);
     let mut b = Vec::with_capacity(master_buffer_size);
     b.resize(master_buffer_size, 0);
+    println!("done");
 
-    let mut read = ReadHdfsFile::open(cx, source.clone()).unwrap();
+    let mut file = ReadHdfsFile::open(cx, source.clone()).unwrap();
 
     for op in p {
         println!("{:?}...", op);
         match op {
             Op::Seek(o) => { 
-                read.seek(SeekFrom::Start(o.try_into().unwrap())).unwrap(); 
+                file.seek(SeekFrom::Start(o.try_into().unwrap())).unwrap(); 
             }
             Op::Read(l, f) => {
                 let length: usize = l.try_into().unwrap();
-                let readcount = read.read(&mut b[0..length]).unwrap();
+                let readcount = file.read(&mut b[0..length]).unwrap();
                 assert_eq!(length, readcount);
                 let writecount = File::create(&Path::new(&f)).unwrap().write(&b[0..length]).unwrap();
                 assert_eq!(length, writecount);
@@ -130,6 +137,21 @@ e=entrypoint, s=source, p=program, n=natmap);
         }
     }
 
-    if do_scripts { run_script("./itt.sh --validate", "Validation failed"); }
+    let (c,_,_) = file.into_parts();
+
+    println!("Write test");
+    let files = writescript.split(' ').filter(|e| !e.is_empty()).collect::<Vec<&str>>();
+    let mut file = WriteHdfsFile::create(c, target.clone(), CreateOptions::new(), AppendOptions::new()).unwrap();
+    let mut count = 0usize;
+
+    for file_name in files {
+        println!("{}", file_name);
+        let fb = read(Path::new(&file_name)).expect("couldn't read wseg");
+        count += file.write(&fb).unwrap();
+    }
+
+    assert_eq!(count, size as usize);
+
+    //if do_itt { run_shell("./itt.sh --validate", "Validation failed"); }
 
 }
