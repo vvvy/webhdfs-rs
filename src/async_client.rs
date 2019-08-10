@@ -11,109 +11,7 @@ use crate::natmap::{NatMap, NatMapPtr};
 use crate::error::*;
 use crate::rest_client::HttpxClient;
 use crate::datatypes::*;
-
-
-#[derive(Debug)]
-enum Op {
-    LISTSTATUS,
-    GETFILESTATUS,
-    OPEN,
-    CREATE,
-    APPEND
-}
-
-impl Op {
-    pub fn op_string(&self) -> &'static str {
-        match self {
-            Op::LISTSTATUS => "LISTSTATUS",
-            Op::GETFILESTATUS => "GETFILESTATUS",
-            Op::OPEN => "OPEN",
-            Op::CREATE => "CREATE",
-            Op::APPEND => "APPEND"
-        }
-    }
-}
-
-/// Operation argument
-#[derive(Debug)]
-enum OpArg {
-    /// `[&offset=<LONG>]`
-    Offset(i64),
-    /// `[&length=<LONG>]`
-    Length(i64),
-    /// `[&buffersize=<INT>]`
-    BufferSize(i32),
-    /// `[&overwrite=<true |false>]`
-    Overwrite(bool),
-    /// `[&blocksize=<LONG>]`
-    Blocksize(i64),
-    /// `[&replication=<SHORT>]`
-    Replication(i16),
-    /// `[&permission=<OCTAL>]`
-    Permission(u16)
-}
-
-impl OpArg {
-    /// add to an url's query string
-    fn add_to_url(&self, qe: QueryEncoder) -> QueryEncoder {
-        match self {
-            OpArg::Offset(v) => qe.add_pi("offset", *v),
-            OpArg::Length(v) => qe.add_pi("length", *v),
-            OpArg::BufferSize(v) => qe.add_pi("buffersize", *v as i64),
-            OpArg::Overwrite(v) => qe.add_pb("overwrite", *v),
-            OpArg::Blocksize(v) => qe.add_pi("blocksize", *v),
-            OpArg::Replication(v) => qe.add_pi("replication", *v as i64),
-            OpArg::Permission(v) => qe.add_po("permission", *v),
-        }
-    }
-}
-
-macro_rules! opt {
-    ($tag:ident, $tp:ty, $op_tag:ident) => {
-        pub fn $tag(mut self, v:$tp) -> Self { self.o.push(OpArg::$op_tag(v)); self }
-    };
-}
-
-macro_rules! opts {
-    // `[&offset=<LONG>]`
-    (offset) => { opt! { offset, i64, Offset } };
-    // `[&length=<LONG>]`
-    (length) => { opt! { length, i64, Length } };
-    // `[&overwrite=<true |false>]`
-    (overwrite) =>  { opt! { overwrite, bool, Overwrite } };
-    // `[&blocksize=<LONG>]`
-    (blocksize) => { opt! { blocksize, i64, Blocksize } };
-    // `[&replication=<SHORT>]`
-    (replication) => { opt! { replication, i16, Replication } };
-    // `[&permission=<OCTAL>]`
-    (permission) => { opt! { permission, u16, Permission } };
-    // `[&buffersize=<INT>]`
-    (buffersize) => { opt! { buffersize, i32, BufferSize } };
-}
-
-macro_rules! op_builder {
-    ($tag:ident => $($op:ident),+) => {
-        pub struct $tag { o: Vec<OpArg> }
-        impl $tag { 
-            pub fn new() -> Self { Self { o: vec![] } }
-            fn into(self) -> Vec<OpArg> { self.o }
-            $( opts!{$op} )+
-        }
-    };
-}
-
-//curl -i -L "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=OPEN
-//                    [&offset=<LONG>][&length=<LONG>][&buffersize=<INT>]"
-op_builder! { OpenOptions => offset, length, buffersize }
-
-//curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CREATE
-//           [&overwrite=<true |false>][&blocksize=<LONG>][&replication=<SHORT>]
-//           [&permission=<OCTAL>][&buffersize=<INT>]"
-op_builder! { CreateOptions => overwrite, blocksize, replication, permission, buffersize }
-
-//curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=APPEND[&buffersize=<INT>]"
-op_builder! { AppendOptions => buffersize }
-
+use crate::op::*;
 
 
 //--------------------------------------------------------
@@ -124,25 +22,34 @@ pub struct HdfsClient {
     default_timeout: Duration
 }
 
+/// Builder for `HdfsClient`
+pub struct HdfsClientBuilder {
+    c: HdfsClient
+}
+
+impl HdfsClientBuilder {
+    const DEFAULT_TIMEOUT_S: u64 = 30;
+    pub fn new(entrypoint: Uri) -> Self { 
+        Self { c: HdfsClient {
+                entrypoint: entrypoint.into_parts(),
+                natmap: NatMapPtr::empty(),
+                default_timeout: Duration::from_secs(Self::DEFAULT_TIMEOUT_S)
+        }  } 
+    }
+    pub fn natmap(self, natmap: NatMap) -> Self {
+        Self { c: HdfsClient { natmap: NatMapPtr::new(natmap), ..self.c } }
+    }
+    pub fn default_timeout(self, timeout: Duration) -> Self {
+        Self { c: HdfsClient { default_timeout: timeout, ..self.c } }
+    }
+    pub fn build(self) -> HdfsClient { self.c }
+}
+
 impl HdfsClient {
     const SVC_MOUNT_POINT: &'static str = "/webhdfs/v1";
-    const DEFAULT_TIMEOUT_S: u64 = 30;
 
-    pub fn new(entrypoint: Uri, natmap: NatMap) -> Self {
-        Self { 
-            entrypoint: entrypoint.into_parts(), 
-            natmap: NatMapPtr::new(natmap), 
-            default_timeout: Duration::from_secs(Self::DEFAULT_TIMEOUT_S)
-        }
-    }
-    pub fn from_entrypoint(entrypoint: Uri) -> Self {
-        Self { 
-            entrypoint: entrypoint.into_parts(), 
-            natmap: NatMapPtr::empty(), 
-            default_timeout: Duration::from_secs(Self::DEFAULT_TIMEOUT_S)
-        }
-    }
     fn natmap(&self) -> NatMapPtr { self.natmap.clone() }
+    
     fn uri(&self, file_path: &str, op: Op, args: Vec<OpArg>) -> Result<Uri> {
         let mut b = Uri::builder();        
         if let Some(scheme) = &self.entrypoint.scheme { b.scheme(scheme.clone()); }

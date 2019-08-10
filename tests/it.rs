@@ -9,9 +9,19 @@ use std::io::{Read, Write, Seek, SeekFrom, BufRead, BufReader};
 use std::collections::HashMap;
 use std::convert::TryInto;
 
+
 #[test]
 fn test_read() {
     println!("Integration test -- start");
+
+    let do_scripts = if let Ok(..) = std::env::var("WEBHDFS_BYPASS_SCRIPTS") { false } else { true };
+
+    fn run_script(cmdline: &str, msg: &'static str) {
+        use std::process::Command;
+        assert!(Command::new("bash").arg("-c").arg(cmdline).status().expect("could not run bash").success(), msg)
+    }
+
+    if do_scripts { run_script("./itt.sh --prepare", "Could not prepare"); }
 
     fn file_as_string(path: &str) -> String {
         String::from_utf8_lossy(&read(path).expect("cannot file-as-stirng")).to_owned().to_string()
@@ -44,7 +54,10 @@ e=entrypoint, s=source, p=program, n=natmap);
 
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
     let entrypoint_uri = "http://".to_owned() + &entrypoint;
-    let cx = SyncHdfsClient::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"), nm).expect("cannot HdfsContext::new");
+    let cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
+        .natmap(nm)
+        .build()
+        .expect("cannot HdfsContext::new");
 
     let (source_dir, source_sfn) = source.split_at(source.rfind('/').expect("source does not contain '/'"));
     let (_, source_fn) = source_sfn.split_at(1);
@@ -117,5 +130,6 @@ e=entrypoint, s=source, p=program, n=natmap);
         }
     }
 
+    if do_scripts { run_script("./itt.sh --validate", "Validation failed"); }
 
 }

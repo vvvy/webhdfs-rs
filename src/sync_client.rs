@@ -16,11 +16,35 @@ use crate::datatypes::*;
 use crate::async_client::*;
 use crate::natmap::NatMap;
 
+pub use crate::op::*;
+
 /// HDFS Connection data, etc.
 #[derive(Clone)]
 pub struct SyncHdfsClient {
     acx: Rc<HdfsClient>, 
     rt: Rc<RefCell<Runtime>>,
+}
+
+pub struct SyncHdfsClientBuilder {
+    a: HdfsClientBuilder
+}
+
+impl SyncHdfsClientBuilder {
+    pub fn new(entrypoint: Uri) -> Self { 
+        Self { a: HdfsClientBuilder::new(entrypoint) } 
+    }
+    pub fn natmap(self, natmap: NatMap) -> Self {
+        Self { a: self.a.natmap(natmap), ..self }
+    }
+    pub fn default_timeout(self, timeout: Duration) -> Self {
+        Self { a: self.a.default_timeout(timeout), ..self }
+    }
+    pub fn build(self) -> Result<SyncHdfsClient> {
+         Ok(SyncHdfsClient { 
+            acx: Rc::new(self.a.build()), 
+            rt: Rc::new(RefCell::new(Runtime::new()?))
+        })
+    }
 }
 
 impl SyncHdfsClient {
@@ -29,14 +53,6 @@ impl SyncHdfsClient {
             acx: Rc::new(acx), 
             rt: Rc::new(RefCell::new(Runtime::new()?))
         })
-    }
-
-    pub fn new(entrypoint: Uri, natmap: NatMap) -> Result<Self> {
-        Self::from_async_context(HdfsClient::new(entrypoint, natmap))
-    }
-
-    pub fn from_entrypoint(entrypoint: Uri) -> Result<Self> {
-        Self::from_async_context(HdfsClient::from_entrypoint(entrypoint))
     }
     
     #[inline]
@@ -145,24 +161,25 @@ impl Seek for ReadHdfsFile {
 pub struct WriteHdfsFile {
     cx: SyncHdfsClient,
     path: String,
+    opts: AppendOptions
 }
 
 impl WriteHdfsFile {
-    pub fn create(cx: SyncHdfsClient, path: String, opts: CreateOptions) -> Result<WriteHdfsFile> {
-        cx.exec(cx.acx.create(&path, vec![], opts))?;
-        Ok(Self { cx, path })
+    pub fn create(cx: SyncHdfsClient, path: String, c_opts: CreateOptions, a_opts: AppendOptions) -> Result<WriteHdfsFile> {
+        cx.exec(cx.acx.create(&path, vec![], c_opts))?;
+        Ok(Self { cx, path, opts: a_opts })
     }
-    pub fn append(cx: SyncHdfsClient, path: String) -> Result<WriteHdfsFile> {
-        Ok(Self { cx, path })
+    pub fn append(cx: SyncHdfsClient, path: String, opts: AppendOptions) -> Result<WriteHdfsFile> {
+        Ok(Self { cx, path, opts })
     }
 }
 
 impl Write for WriteHdfsFile {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        //TODO this is apparently a performance killer. We need at least faster buffer copy, and ideally zero-copy
-        let mut b: Vec<u8> = Vec::with_capacity(buf.len());
-        b.extend(buf.iter());
-        let f = self.cx.acx.append(&self.path, b, AppendOptions::new());
+        //TODO We ideally need zero-copy.
+        //As tokio doesn't use scoped threading, need kinda unsafe trick to make it think the buf is 'static
+        let b = buf.to_owned();
+        let f = self.cx.acx.append(&self.path, b, self.opts.clone());
         let _ = self.cx.exec(f)?;
         Ok(buf.len())
     }

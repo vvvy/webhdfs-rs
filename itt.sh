@@ -58,6 +58,9 @@ C_WEBHDFS_NN_PORT=50070
 #webhdfs DN port inside containers
 C_WEBHDFS_DN_PORT=50075
 
+[ `uname -o` == "Cygwin" ] && { IS_CYGWIN=true ; DRIVES_CONTAINER=/cygdrive ; }
+grep -q Microsoft /proc/version && { IS_WSL=true ; DRIVES_CONTAINER=/mnt ; }
+
 if [ -x ./itt-config.sh ]; then . ./itt-config.sh ; fi
 
 LOCALHOST=localhost
@@ -202,6 +205,10 @@ prepare() {
     fi
 }
 
+unprepare() {
+    rm -f $TESTDATA_DIR/.prepared $SHASUMS $NATMAP $ENTRYPOINT $PROGRAMFILE $SIZEFILE $SEGFILE_PREFIX*
+}
+
 create-args() {
     I=0
     FN=0
@@ -241,7 +248,7 @@ validate() {
 
 cd `dirname $0`
 #WSL and Cygwin only
-if [ `uname -o` == "Cygwin" ] || grep -q Microsoft /proc/version ; then
+if [ -n "$IS_CYGWIN" -o -n "$IS_WSL" ] ; then
     docker() { docker.exe "$@" | tr -d \\r ; }
     export -f docker
     docker-compose() { docker-compose.exe "$@" | tr -d \\r ; }
@@ -263,6 +270,9 @@ case "$1" in
         ;;
     --prepare)
         prepare $2
+        ;;
+    --unprepare)
+        unprepare
         ;;
     --validate)
         validate
