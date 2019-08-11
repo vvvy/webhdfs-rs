@@ -31,6 +31,7 @@ pub struct HdfsClientBuilder {
 
 impl HdfsClientBuilder {
     const DEFAULT_TIMEOUT_S: u64 = 30;
+    /// Creates new builder from entrypoint
     pub fn new(entrypoint: Uri) -> Self { 
         Self { c: HdfsClient {
                 entrypoint: entrypoint.into_parts(),
@@ -39,6 +40,23 @@ impl HdfsClientBuilder {
                 user_name: None,
                 dt: None
         }  } 
+    }
+    /// Creates new builder, filled with the configuration read from the configuration files.
+    /// See comments at `crate::config` for detailed semantics.
+    pub fn from_config() -> Self {
+        let conf = crate::config::read_config();
+        Self { c: HdfsClient {
+                entrypoint: 
+                    conf.entrypoint.into_uri().into_parts(),
+                natmap: 
+                    NatMapPtr::empty(),
+                default_timeout: 
+                    conf.default_timeout.unwrap_or_else(|| Duration::from_secs(Self::DEFAULT_TIMEOUT_S)),
+                user_name: 
+                    conf.user_name,
+                dt: 
+                    conf.dt
+        }  }        
     }
     pub fn natmap(self, natmap: NatMap) -> Self {
         Self { c: HdfsClient { natmap: NatMapPtr::new(natmap), ..self.c } }

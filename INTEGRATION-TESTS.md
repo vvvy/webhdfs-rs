@@ -12,27 +12,92 @@ Steps:
 Sample output from `itt.sh --run`:
 
 ```
-entrypoint='localhost:32775'
+vvv@VVV-ZEN /cygdrive/c/devel/src/webhdfs-rs
+$ ./itt.sh --run
+262144+0 records in
+262144+0 records out
+134217728 bytes (134 MB, 128 MiB) copied, 3.79161 s, 35.4 MB/s
+2048+0 records in
+2048+0 records out
+1048576 bytes (1.0 MB, 1.0 MiB) copied, 0.0435213 s, 24.1 MB/s
+262144+0 records in
+262144+0 records out
+134217728 bytes (134 MB, 128 MiB) copied, 3.58243 s, 37.5 MB/s
+82801+1 records in
+82801+1 records out
+42394150 bytes (42 MB, 40 MiB) copied, 1.12798 s, 37.6 MB/s
+331204+1 records in
+331204+1 records out
+169576604 bytes (170 MB, 162 MiB) copied, 4.60579 s, 36.8 MB/s
+165602+1 records in
+165602+1 records out
+84788301 bytes (85 MB, 81 MiB) copied, 2.27223 s, 37.3 MB/s
+248403+1 records in
+248403+1 records out
+127182453 bytes (127 MB, 121 MiB) copied, 3.48071 s, 36.5 MB/s
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+    Finished dev [unoptimized + debuginfo] target(s) in 1.74s
+     Running target\debug\deps\it-45ec8ddd9e6a4768.exe
+
+running 1 test
+Integration test -- start
+
+entrypoint='localhost:32779'
 source='/user/root/test-data/soc-pokec-relationships.txt'
-program='r:128m:./test-data/seg-0 s:0 r:1m:./test-data/seg-1 r:128m:./test-data/seg-2'
-natmap={"792bc6221497.bigtop.apache.org:50070": "localhost:32775", "792bc6221497.bigtop.apache.org:50075": "localhost:32774", "62bd375b9b0f.bigtop.apache.org:50075": "localhost:32776", "865a9775aefb.bigtop.apache.org:50075": "localhost:32778"}
-Dir: Ok(ListStatusResponse { file_statuses: FileStatuses { file_status: [FileStatus { access_time: 1564727295615, block_size: 134217728, group: "hadoop", length: 423941508, modification_time: 1564668155321, owner: "root", path_suffix: "soc-pokec-relationships.txt", permission: "644", replication: 3, type_: "FILE" }] } })
-Stat: Ok(FileStatusResponse { file_status: FileStatus { access_time: 1564727295615, block_size: 134217728, group: "hadoop", length: 423941508, modification_time: 1564668155321, owner: "root", path_suffix: "", permission: "644", replication: 3, type_: "FILE" } })
+readscript='r:128m:./test-data/seg-0 s:0 r:1m:./test-data/seg-1 r:128m:./test-data/seg-2'
+target='/user/root/test-data/soc-pokec-relationships.txt.w'
+writescript='./test-data/wseg-0 ./test-data/wseg-1 ./test-data/wseg-2 ./test-data/wseg-3'
+natmap={"6bb4e3f67eb1.bigtop.apache.org:50075": "localhost:32776", "4706500458f4.bigtop.apache.org:50075": "localhost:32778", "4706500458f4.bigtop.apache.org:50070": "localhost:32779", "80410e5775e2.bigtop.apache.org:50075": "localhost:32774"}
+Test dir and stat
+Dir: Ok(ListStatusResponse { file_statuses: FileStatuses { file_status: [FileStatus { access_time: 1565447247120, block_size: 134217728, group: "hadoop", length: 423941508, modification_time: 1565447266279, owner: "root", path_suffix: "soc-pokec-relationships.txt", permission: "644", replication: 3, type_: "FILE" }] } })
+Stat: Ok(FileStatusResponse { file_status: FileStatus { access_time: 1565447247120, block_size: 134217728, group: "hadoop", length: 423941508, modification_time: 1565447266279, owner: "root", path_suffix: "", permission: "644", replication: 3, type_: "FILE" } })
+Read test
+alloc_mb(len=134217728)...done
 Read(134217728, "./test-data/seg-0")...
+test webhdfs_test ... test webhdfs_test has been running for over 60 seconds
 Seek(0)...
 Read(1048576, "./test-data/seg-1")...
 Read(134217728, "./test-data/seg-2")...
-test test_read ... ok
+Write test
+./test-data/wseg-0
+./test-data/wseg-1
+./test-data/wseg-2
+./test-data/wseg-3
+test webhdfs_test ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-```
 
-Sample output from `./itt.sh --validate`
-
-```
 ./test-data/seg-0: OK
 ./test-data/seg-1: OK
 ./test-data/seg-2: OK
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+Write checksums Ok
+WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
+WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
+Deleted /user/root/test-data/soc-pokec-relationships.txt.w
+
 ```
 
 # Useful tips and tricks

@@ -25,4 +25,5 @@ log = "0.4"
 tokio = "0.1"
 http = "0.1"
 mime = "0.3"
+toml = "0.5"
 

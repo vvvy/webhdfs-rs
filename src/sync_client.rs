@@ -33,6 +33,9 @@ impl SyncHdfsClientBuilder {
     pub fn new(entrypoint: Uri) -> Self { 
         Self { a: HdfsClientBuilder::new(entrypoint) } 
     }
+    pub fn from_config() -> Self { 
+        Self { a: HdfsClientBuilder::from_config() } 
+    }
     pub fn natmap(self, natmap: NatMap) -> Self {
         Self { a: self.a.natmap(natmap), ..self }
     }
@@ -54,7 +57,7 @@ impl SyncHdfsClientBuilder {
 }
 
 impl SyncHdfsClient {
-    fn from_async_context(acx: HdfsClient)-> Result<Self> {
+    pub fn from_async(acx: HdfsClient)-> Result<Self> {
         Ok(Self { 
             acx: Rc::new(acx), 
             rt: Rc::new(RefCell::new(Runtime::new()?))
