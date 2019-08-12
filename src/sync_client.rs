@@ -175,21 +175,32 @@ pub struct WriteHdfsFile {
 
 impl WriteHdfsFile {
     pub fn create(cx: SyncHdfsClient, path: String, c_opts: CreateOptions, a_opts: AppendOptions) -> Result<WriteHdfsFile> {
-        cx.exec(cx.acx.create(&path, vec![], c_opts))?;
+        cx.exec(cx.acx.create(&path, crate::rest_client::data_empty(), c_opts))?;
         Ok(Self { cx, path, opts: a_opts })
     }
     pub fn append(cx: SyncHdfsClient, path: String, opts: AppendOptions) -> Result<WriteHdfsFile> {
         Ok(Self { cx, path, opts })
     }
+
+    ///zero-copy write (work around tokio's lack of support for scoped threading)
+    #[cfg(feature = "zero-copy-on-write")]
+    fn do_write(&mut self, buf: &[u8]) -> Result<()> {
+        let b: & 'static [u8] = unsafe { std::mem::transmute(buf) };
+        let f = self.cx.acx.append(&self.path, crate::rest_client::data_borrowed(b), self.opts.clone());
+        self.cx.exec(f)
+    }
+
+    #[cfg(not(feature = "zero-copy-on-write"))]
+    fn do_write(&mut self, buf: &[u8]) -> Result<()> {
+        let b = buf.to_owned();
+        let f = self.cx.acx.append(&self.path, crate::rest_client::data_owned(b), self.opts.clone());
+        self.cx.exec(f)
+    }
 }
 
 impl Write for WriteHdfsFile {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        //TODO We ideally need zero-copy.
-        //As tokio doesn't use scoped threading, need kinda unsafe trick to make it think the buf is 'static
-        let b = buf.to_owned();
-        let f = self.cx.acx.append(&self.path, b, self.opts.clone());
-        let _ = self.cx.exec(f)?;
+        let () = self.do_write(buf)?;
         Ok(buf.len())
     }
     fn flush(&mut self) -> IoResult<()> {

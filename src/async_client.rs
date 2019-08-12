@@ -9,7 +9,7 @@ use crate::uri_tools::*;
 use crate::natmap::{NatMap, NatMapPtr};
 
 use crate::error::*;
-use crate::rest_client::HttpyClient;
+use crate::rest_client::{HttpyClient, Data};
 use crate::datatypes::*;
 use crate::op::*;
 
@@ -125,7 +125,7 @@ impl HdfsClient {
     }
 
     /// Create a HDFS file and write some data
-    pub fn create(&self, path: &str, data: Vec<u8>, opts: CreateOptions) 
+    pub fn create(&self, path: &str, data: Data, opts: CreateOptions) 
     -> impl Future<Item=(), Error=Error> + Send {
         //curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CREATE
         //           [&overwrite=<true |false>][&blocksize=<LONG>][&replication=<SHORT>]
@@ -136,7 +136,7 @@ impl HdfsClient {
     }
 
     /// Append to a HDFS file
-    pub fn append(&self, path: &str, data: Vec<u8>, opts: AppendOptions) 
+    pub fn append(&self, path: &str, data: Data, opts: AppendOptions) 
     -> impl Future<Item=(), Error=Error> + Send {
         //curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=APPEND[&buffersize=<INT>]"
         let natmap = self.natmap();

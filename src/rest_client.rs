@@ -140,8 +140,23 @@ fn http_empty_body(mut request: RequestBuilder) -> Result<Request<Body>> {
     Ok(request.body(Body::empty())?)
 }
 
+/// Data being sent out
+pub type Data = std::borrow::Cow<'static, [u8]>;
+
+#[cfg(not(feature = "zero-copy-on-write"))]
 #[inline]
-fn http_binary_body(mut request: RequestBuilder, payload: Vec<u8>) -> Result<Request<Body>> {
+pub fn data_owned(d: Vec<u8>) -> Data { std::borrow::Cow::Owned(d) }
+
+#[cfg(feature = "zero-copy-on-write")]
+#[inline]
+pub fn data_borrowed(d: &'static [u8]) -> Data { std::borrow::Cow::Borrowed(d) }
+
+#[inline]
+pub fn data_empty() -> Data { std::borrow::Cow::Borrowed(&[]) }
+
+
+#[inline]
+fn http_binary_body(mut request: RequestBuilder, payload: Data) -> Result<Request<Body>> {
     Ok(request.body(Body::from(payload))?)
 }
 
@@ -195,7 +210,7 @@ impl HttpxClient
     }
 
     #[inline]
-    fn post_like_future(&self, uri: Uri, method: Method, payload: Vec<u8>) -> impl Future<Item=Response<Body>, Error=Error> + Send {
+    fn post_like_future(&self, uri: Uri, method: Method, payload: Data) -> impl Future<Item=Response<Body>, Error=Error> + Send {
         let r = self.create_request(method, uri);
         let f = http_binary_body(r, payload).map(|r| self.endpoint.request_raw(r).from_err());
         futures::future::result(f).flatten()
@@ -208,7 +223,7 @@ impl HttpxClient
         }
     }
 
-    fn new_post_like(uri: Uri, method: Method, payload: Vec<u8>) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
+    fn new_post_like(uri: Uri, method: Method, payload: Data) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
         match Self::new(&uri) {
             Ok(c) => Box::new(c.post_like_future(uri, method, payload)),
             Err(e) => Box::new(futures::future::err(e))
@@ -280,7 +295,7 @@ impl HttpyClient {
         f2
     }
 
-    pub fn post_binary(self, method: Method, data: Vec<u8>) -> impl Future<Item=(), Error=Error> + Send {
+    pub fn post_binary(self, method: Method, data: Data) -> impl Future<Item=(), Error=Error> + Send {
         let method1 = method.clone();
         let f0 = self.request_with_redirect(
             |uri| HttpxClient::new_get_like(uri, method1), 
