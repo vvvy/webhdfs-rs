@@ -243,14 +243,14 @@ impl HttpyClient {
     #[inline]
     fn request_with_redirect(
         self, 
-        rf0: impl FnOnce(Uri) -> Box<Future<Item=Response<Body>, Error=Error> + Send> + Send,
-        rf1: impl FnOnce(Uri) -> Box<Future<Item=Response<Body>, Error=Error> + Send> + Send
+        rf0: impl FnOnce(Uri) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> + Send,
+        rf1: impl FnOnce(Uri) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> + Send
         ) -> impl Future<Item=Response<Body>, Error=Error> + Send {
 
         fn handle_redirect(
             r: Result<Response<Body>>, 
             natmap: NatMapPtr,
-            rf1: impl FnOnce(Uri) -> Box<Future<Item=Response<Body>, Error=Error> + Send>
+            rf1: impl FnOnce(Uri) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send>
             ) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
             use futures::future::{ok, err};
             match r {

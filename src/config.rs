@@ -54,6 +54,7 @@ pub struct Config {
     pub entrypoint: UriW,
     pub default_timeout: Option<Duration>,
     pub user_name: Option<String>,
+    pub doas: Option<String>,
     pub dt: Option<String>
 }
 
@@ -128,6 +129,7 @@ pub fn write_sample_config() {
         entrypoint: UriW::new("http://namenode.hdfs.intra:50070".parse().unwrap()),
         default_timeout: Some(Duration::from_secs(30)),
         user_name: Some("dr.who".to_owned()),
+        doas: Some("doas.user".to_owned()),
         dt: Some("---encoded-delegation-token---".to_owned())
     };
     write_config(&Path::new("template.webhdfs.toml"), &c, false)

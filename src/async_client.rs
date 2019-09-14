@@ -21,6 +21,7 @@ pub struct HdfsClient {
     natmap: NatMapPtr,
     default_timeout: Duration,
     user_name: Option<String>,
+    doas: Option<String>,
     dt: Option<String>
 }
 
@@ -38,6 +39,7 @@ impl HdfsClientBuilder {
                 natmap: NatMapPtr::empty(),
                 default_timeout: Duration::from_secs(Self::DEFAULT_TIMEOUT_S),
                 user_name: None,
+                doas: None,
                 dt: None
         }  } 
     }
@@ -54,6 +56,8 @@ impl HdfsClientBuilder {
                     conf.default_timeout.unwrap_or_else(|| Duration::from_secs(Self::DEFAULT_TIMEOUT_S)),
                 user_name: 
                     conf.user_name,
+                doas:
+                    conf.doas,
                 dt: 
                     conf.dt
         }  }        
@@ -66,6 +70,9 @@ impl HdfsClientBuilder {
     }
     pub fn user_name(self, user_name: String) -> Self {
         Self { c: HdfsClient { user_name: Some(user_name), ..self.c } }
+    }    
+    pub fn doas(self, doas: String) -> Self {
+        Self { c: HdfsClient { doas: Some(doas), ..self.c } }
     }
     pub fn delegation_token(self, dt: String) -> Self {
         Self { c: HdfsClient { dt: Some(dt), ..self.c } }
@@ -85,6 +92,7 @@ impl HdfsClient {
 
         let q = PathEncoder::new(Self::SVC_MOUNT_POINT).extend(file_path).query();
         let q = if let Some(user) = &self.user_name { q.add_pv("user.name", user) } else { q };
+        let q = if let Some(doas) = &self.doas { q.add_pv("doas", doas) } else { q };
         let q = if let Some(dt) = &self.dt { q.add_pv("delegation", dt) } else { q };
         let q = q.add_pv("op", op.op_string());
         let q = args.iter().fold(q, |q, s| s.add_to_url(q));
