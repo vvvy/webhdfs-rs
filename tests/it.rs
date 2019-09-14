@@ -30,6 +30,7 @@ fn webhdfs_test() {
     let writescript = file_as_string("./test-data/writescript");
     let source = file_as_string("./test-data/source");
     let target = file_as_string("./test-data/target");
+    let user = file_as_string("./test-data/user");
     let size = file_as_string("./test-data/size").parse::<i64>().unwrap();
 
     let f = File::open("./test-data/natmap").expect("cannot open natmap");
@@ -50,14 +51,16 @@ source='{s}'
 readscript='{r}'
 target='{t}'
 writescript='{w}'
-natmap={n:?}", 
-e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap);
+natmap={n:?}
+user={u}
+size={z}", 
+e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap, u=user, z=size);
 
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
     let entrypoint_uri = "http://".to_owned() + &entrypoint;
     let cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
         .natmap(nm)
-        .user_name("root".to_owned())
+        .user_name(user)
         .build()
         .expect("cannot HdfsContext::new");
 
@@ -145,6 +148,7 @@ e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap);
     let mut count = 0usize;
 
     for file_name in files {
+        //std::thread::sleep(std::time::Duration::from_secs(3));
         println!("{}", file_name);
         let fb = read(Path::new(&file_name)).expect("couldn't read wseg");
         count += file.write(&fb).unwrap();

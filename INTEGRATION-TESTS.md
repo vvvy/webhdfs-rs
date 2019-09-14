@@ -1,134 +1,141 @@
 # `webhdfs` integration tests
 
-Intergation tests are set up with Apache Bigtop provisioner 3-node cluster. See comments in [`itt.sh`](itt.sh) and `itt.sh --help` for details.
+Intergation tests are set up with Apache Bigtop provisioner vagrant (typically 1-node) or docker (typically 3-node) cluster.
+The test process itself runs on the host. See comments in [`itt.sh`](itt.sh) and `itt.sh --help` for details.
 
 DISCLAIMER: the integration tests were developed on a Windows 10 machine (using Docker Desktop and both Cygwin and WSL). While the best effort was made to ensure Linux and OS X compatibility, the test scripts have not been tested there (yet), and may contain bugs. Sholud you notice any bugs and incompatibilies, please create an issue in the webhdfs Github project.
 
-Steps:
+## Preparation
 
-    1. Launch the Bigtop cluster (ensure the supplemental configuration is applied)
-    2. Run `itt.sh --run`
+1. Install prerequisites
+* either docker or vagrant
+* For docker, also install ruby. 
+* For vagrant, you will need Virtualbox (other providers are untested). 
+* Under Windows you will also need Cygwin or WSL. Cygwin is recommended if Docker is used with Bigtop provisioner 
+(because of docker to windows console interop issues), while WSL is recommended for Vagrant.
+2. Check out Bigtop. version 1.3 was used (`rel/1.3` tag).
+3. Create a file named `itt-config.sh` in the webhdfs source root, and make it `chmod +x`. This is the test configuration script.
+4. Set `BIGTOP_ROOT` var to the root path of the cloned Bigtop repo. It must be set in the test config script. 
+5. Edit Bigtop provisioner configuration to make guest webhdfs ports 50070 and 50075 accessible from the host, and
+guest folder `/test-data` mounted to the folder `test-data` under webhdfs source root. See Sharing ports and folders below for instructions.
+6. Using Bigtop tools, bring the cluster up and make sure the shared folder is mounted and the ports are accessble from the host.
+7. The test script uses Vagrant by default. To use docker, specify `PROVISIONER=docker` in the test config script.
 
-Sample output from `itt.sh --run`:
+NOTES:
+1. There is a number of other settings that may be specified in `itt-config.sh`. See [`itt.sh`](itt.sh) for details.
+2. If you use the number of VMs or containers other than default (1 for vagrant and 3 for docker), the exact number of containers must be 
+specified in `N_C` setting in the test config script, otherwise the test might fail.
 
-```
-vvv@VVV-ZEN /cygdrive/c/devel/src/webhdfs-rs
-$ ./itt.sh --run
-262144+0 records in
-262144+0 records out
-134217728 bytes (134 MB, 128 MiB) copied, 3.79161 s, 35.4 MB/s
-2048+0 records in
-2048+0 records out
-1048576 bytes (1.0 MB, 1.0 MiB) copied, 0.0435213 s, 24.1 MB/s
-262144+0 records in
-262144+0 records out
-134217728 bytes (134 MB, 128 MiB) copied, 3.58243 s, 37.5 MB/s
-82801+1 records in
-82801+1 records out
-42394150 bytes (42 MB, 40 MiB) copied, 1.12798 s, 37.6 MB/s
-331204+1 records in
-331204+1 records out
-169576604 bytes (170 MB, 162 MiB) copied, 4.60579 s, 36.8 MB/s
-165602+1 records in
-165602+1 records out
-84788301 bytes (85 MB, 81 MiB) copied, 2.27223 s, 37.3 MB/s
-248403+1 records in
-248403+1 records out
-127182453 bytes (127 MB, 121 MiB) copied, 3.48071 s, 36.5 MB/s
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-    Finished dev [unoptimized + debuginfo] target(s) in 1.74s
-     Running target\debug\deps\it-45ec8ddd9e6a4768.exe
+### Sharing ports and folders: Docker
 
-running 1 test
-Integration test -- start
+Go to the `provisioner/docker` folder under Bigtop source root. Edit `docker-container.yaml` to add the following 
+(edit the absolute volume part):
 
-entrypoint='localhost:32779'
-source='/user/root/test-data/soc-pokec-relationships.txt'
-readscript='r:128m:./test-data/seg-0 s:0 r:1m:./test-data/seg-1 r:128m:./test-data/seg-2'
-target='/user/root/test-data/soc-pokec-relationships.txt.w'
-writescript='./test-data/wseg-0 ./test-data/wseg-1 ./test-data/wseg-2 ./test-data/wseg-3'
-natmap={"6bb4e3f67eb1.bigtop.apache.org:50075": "localhost:32776", "4706500458f4.bigtop.apache.org:50075": "localhost:32778", "4706500458f4.bigtop.apache.org:50070": "localhost:32779", "80410e5775e2.bigtop.apache.org:50075": "localhost:32774"}
-Test dir and stat
-Dir: Ok(ListStatusResponse { file_statuses: FileStatuses { file_status: [FileStatus { access_time: 1565447247120, block_size: 134217728, group: "hadoop", length: 423941508, modification_time: 1565447266279, owner: "root", path_suffix: "soc-pokec-relationships.txt", permission: "644", replication: 3, type_: "FILE" }] } })
-Stat: Ok(FileStatusResponse { file_status: FileStatus { access_time: 1565447247120, block_size: 134217728, group: "hadoop", length: 423941508, modification_time: 1565447266279, owner: "root", path_suffix: "", permission: "644", replication: 3, type_: "FILE" } })
-Read test
-alloc_mb(len=134217728)...done
-Read(134217728, "./test-data/seg-0")...
-test webhdfs_test ... test webhdfs_test has been running for over 60 seconds
-Seek(0)...
-Read(1048576, "./test-data/seg-1")...
-Read(134217728, "./test-data/seg-2")...
-Write test
-./test-data/wseg-0
-./test-data/wseg-1
-./test-data/wseg-2
-./test-data/wseg-3
-test webhdfs_test ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-
-./test-data/seg-0: OK
-./test-data/seg-1: OK
-./test-data/seg-2: OK
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-Write checksums Ok
-WARNING: The DOCKER_IMAGE variable is not set. Defaulting to a blank string.
-WARNING: The MEM_LIMIT variable is not set. Defaulting to a blank string.
-Deleted /user/root/test-data/soc-pokec-relationships.txt.w
-
+```yaml
+   ports:
+   - "50070"
+   - "50075"
+   volumes:
+   - //c/path/to/test-data : /test-data
 ```
 
-# Useful tips and tricks
+### Sharing ports and folders: Vagrant
 
- 1. If the provisioned containers are stopped and then started, Namenode and Resource Manager services are unable to bind to
-    some ports (50070 etc.) and terminate abnormally upon startup. This is likely due to ip addresses of the nodes having changed
-    upon container restart. You need to regenerate hosts files inside containers. The simplest way to achieve this is to slightly
-    modify and run bigtop's `docker-hadoop.sh --provision`: find `-p|--provision)` clause in the mode selector `case` and add 
-    `generate-hosts` just before `provision` line, so it looks somewhat like:
+1. Edit bigtop's Vagrantfile in the `provisioner/vagrant` folder under Bigtop source root and add the following in the VM configuration loop:
 
-```bash
-    -p|--provision)
-        generate-hosts
-        provision
-        shift;;
+```ruby
+      #=== Intergation test environment settings ========================================================
+      if i == 1 then
+        config.vm.network "forwarded_port", guest: 50070, guest_ip: "10.10.10.11", host: 51070
+        bigtop.vm.synced_folder "C:/devel/src/webhdfs-rs/test-data", "/test-data"
+      end
+      config.vm.network "forwarded_port", guest: 50075, host: 50075 + i * 1000
+      #=== END: Intergation test environment settings ===================================================
 ```
 
-    Diff:
+Sample diff:
 
 ```diff
-*** docker-hadoop.sh    2019-07-24 14:26:41.819170800 +0300
---- docker-hadoop2.sh   2019-08-10 16:22:13.249734800 +0300
-***************
-*** 243,248 ****
---- 243,249 ----
-          list
-          shift;;
-      -p|--provision)
-+         generate-hosts
-          provision
-          shift;;
-      -s|--smoke-tests)
+--- Vagrantfile.orig    2019-07-22 17:02:05.929272200 +0300
++++ Vagrantfile 2019-09-14 14:47:58.212960600 +0300
+@@ -118,6 +118,14 @@
+       # two levels up is the bigtop "home" directory.
+       # the current directory has puppet recipes which we need for provisioning.
+       bigtop.vm.synced_folder "../../", "/bigtop-home"
++
++      #=== Intergation test environment settings ========================================================
++      if i == 1 then
++        config.vm.network "forwarded_port", guest: 50070, guest_ip: "10.10.10.11", host: 51070
++        bigtop.vm.synced_folder "C:/devel/src/webhdfs-rs/test-data", "/test-data"
++      end
++      config.vm.network "forwarded_port", guest: 50075, host: 50075 + i * 1000
++      #=== END: Intergation test environment settings ===================================================
+
+       # We also add the bigtop-home output/ dir, so that locally built rpms will be available.
+       puts "Adding output/ repo ? #{enable_local_repo}"
 ```
 
+## How the test works
+
+### Read test
+The read test consists of a sequence of reads and seeks against a testfile, set up by `READSCRIPT` setting.
+The social networking graph data file `soc-pokec-relationships.txt`, available on SNAP, is used as a testflle (any file, large enough, 
+may be used; recommended size is 200-400M).
+During preparation, SHA-512 checksums are pre-calculated for each of `r:` chunks set up by `READSCRIPT` (chunks are extracted by dd utility).
+The program under test is expected to execute the `READSCRIPT` below (actually, `READSCRIPTOUT`) by doing seeks and reads as requested.
+Upon each read, the program reads from the testfile (HDFS) then writes the content read to a file specified by 3rd part of `READSCRIPTOUT` 
+item. Finally, checksums for newly written chunks are validated against pre-calculated checksums.
+
+### hooks
+1. place all local settings in `./itt-config.sh` and make it `chmod a+x`
+2. if using a test file other than standard, or using the standard one but pre-downloaded, or using other source, 
+    place the test file materialzation command(s) in `./test-data./create-source-script` and make it `chmod a+x`. 
+    Note that the script is launched in `./test-data`.
+    Note that if the test file is already in `./test-data`, it is used as-is and left intact 
+    (if downloaded, the test file is deleted from `./test-data` after preparation).
+
+
+## Running the test
+
+1. Bring the Bigtop cluster up
+2. Run `itt.sh --run`
+3. Look for the following terminating line in the output from `itt.sh --run`:
+
+```
+==================== TEST SUCCESSFUL ====================
+```
+
+## Possible problems and workarounds
+
+1. Note that both Bigtop provisioner variants seemingly do not support VM/container reboot. If a cluster's VM is powered down or a container terminated, the cluster shall be entirely deleted and re-created from scratch. However, a VM could be suspended.
+
+2. 'IOException: Failed to replace a bad datanode on the existing pipeline due to no more good datanodes being available to try' errors during write test: Add the following to `/etc/hadoop/conf/hdfs-site.xml` and restart the datanode services(s):
+
+ ```xml
+ <property>
+  <name>dfs.client.block.write.replace-datanode-on-failure.policy</name>
+  <value>NEVER</value>
+</property>
+```
+3. If port forwarding does not work (Vagrant): this might be consequences of VM's reboot. The following are possible temporary workarounds. 
+
+a) a possible cause is iptables in the VM. Check if it is active; if yes, execute
+
+```
+sudo iptables -A IN_public_allow -p tcp --dport 50070 -j ACCEPT
+sudo iptables -A IN_public_allow -p tcp --dport 50075 -j ACCEPT
+```
+
+b) (NN only) the other possible cause is NN binding address mismatch. Check what IP is the NN bound to and specify that address in port
+forwarding settings.
+
+c) Look at `/etc/hosts`, should look as the following. In particular, remove 10.0.*.* entries from the NAT adapter or give this IP a name other than hostname.
+
+```
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+
+## vagrant-hostmanager-start
+10.10.10.11     bigtop1.vagrant
+10.10.10.11     bigtop1.vagrant bigtop1
+## vagrant-hostmanager-end
+```

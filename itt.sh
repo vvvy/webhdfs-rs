@@ -1,74 +1,52 @@
 #!/bin/bash
+# webhdfs integration test tool
+# See INTEGRATION-TESTS.md and 'itt.sh --help' for usage details
 
-#integration test tool
-#
-#prerequisites:
-# 0. (Windows) Cygwin or WSL
-# 1. Apache Bigtop version 1.3
-#   1.1. Bigtop repo cloned locally (rel/1.3 tag) and BIGTOP_ROOT set to the root of the cloned repo
-#   1.2. docker-container.yaml extended with the following settings:
-#   ports:
-#   - "50070"
-#   - "50075"
-#   volumes:
-#   - //c/path/to/test-data : /test-data
-#   1.3. 3-node cluster provisioned via bigtop/provisioner (Windows HOWTO: http://...) with docker-container.yaml extended as above
-#
-#operation:
-# Read test:
-# The read test consists of a sequence of reads and seeks against a testfile, set up by READSCRIPT below.
-# The social networking graph data file 'soc-pokec-relationships.txt', available on SNAP, is used as a testflle (any file, large enough, 
-# may be used; recommended size is 200-400M).
-# During preparation, SHA-512 checksums are pre-calculated for each of r: chunks set up by READSCRIPT (chunks are extracted by dd utility).
-# The program under test is expected to execute the READSCRIPT below (actually, READSCRIPTOUT) by doing seeks and reads as requested.
-# Upon each read, the program reads from the testfile (HDFS) then writes the content read to a file specified by 3rd part of READSCRIPTOUT 
-# item. Finally, checksums for newly written chunks are validated against pre-calculated checksums.
-#
-#hooks:
-# 1. place all local settings in './itt-config.sh' and make it 'chmod a+x'
-# 2. if using a test file other than standard, or using the standard one but pre-downloaded, or using other source, 
-#    place the test file materialzation command(s) in './test-data./create-source-script' and make it 'chmod a+x'. 
-#    Note that the script is launched in './test-data'.
-#    Note that if the test file is already in './test-data', it is used as-is and left intact 
-#    (if downloaded, the test file is deleted from './test-data' after preparation).
-#
-# See 'itt.sh --help' for usage details
-
-
+#If you need to alter the following settings, the best place to do it is './itt-config.sh'
 TESTFILE=soc-pokec-relationships.txt
+#A sequence of instructions to test read
 READSCRIPT=(r:128m s:0 r:1m r:128m)
+#A sequence of instructions to test write
 WRITE_SCRIPT=(0 10% 50% 70%)
-
+#Provisioner (vagrant or docker)
+PROVISIONER=vagrant
 #local directory where test data is maintained
 TESTDATA_DIR=./test-data
 #container directory TESTDATA_DIR maps to
 C_TESTDATA_DIR=/test-data
 #hdfs directory where test file is copied
+#TODO make it /user/vagrant/test-data for vagrant
 HDFS_DIR=/user/root/test-data
 #local bigtop root
 BIGTOP_ROOT=/usr/local/src/bigtop
-#number of bigtop containers
-N_C=3
 #webhdfs NN port inside containers
 C_WEBHDFS_NN_PORT=50070
 #webhdfs DN port inside containers
 C_WEBHDFS_DN_PORT=50075
+#number of bigtop containers or VMs. By default, this is 3 for docker and 1 for vagrant. The default is set below.
+#N_C=...
 
 [ `uname -o` == "Cygwin" ] && { IS_CYGWIN=true ; DRIVES_CONTAINER=/cygdrive ; }
 grep -q Microsoft /proc/version && { IS_WSL=true ; DRIVES_CONTAINER=/mnt ; }
 
 if [ -x ./itt-config.sh ]; then . ./itt-config.sh ; fi
 
+[ -z "$N_C" ] && { [ $PROVISIONER == vagrant ] && N_C=1 || N_C=3 ; }
+[ $PROVISIONER == vagrant ] && HADOOP_USER=vagrant || HADOOP_USER=root
 LOCALHOST=localhost
 TESTFILE_W=$TESTFILE.w
 SOURCE=$TESTDATA_DIR/$TESTFILE
 SHASUMS=$TESTDATA_DIR/shasums
 CHECKSUMFILE=$TESTDATA_DIR/hdfs-checksum
+C_CHECKSUMFILE=$C_TESTDATA_DIR/hdfs-checksum
+CHAL_CHECKSUMFILE=$TESTDATA_DIR/hdfs-checksum-chal
+C_CHAL_CHECKSUMFILE=$C_TESTDATA_DIR/hdfs-checksum-chal
 NATMAP=$TESTDATA_DIR/natmap
 ENTRYPOINT=$TESTDATA_DIR/entrypoint
 READSCRIPTFILE=$TESTDATA_DIR/readscript
 WRITESCRIPTFILE=$TESTDATA_DIR/writescript
 SIZEFILE=$TESTDATA_DIR/size
+USERFILE=$TESTDATA_DIR/user
 SOURCEPATHFILE=$TESTDATA_DIR/source
 TARGETPATHFILE=$TESTDATA_DIR/target
 SEGFILE_PREFIX=$TESTDATA_DIR/seg-
@@ -161,20 +139,91 @@ create-wsegs() {
     done
 }
 
+#if [ $PROVISIONER == vagrant ]
+#then
+
+case $PROVISIONER in
+
+vagrant)
+
+vagcmd() {
+    (cd $BIGTOP_ROOT/provisioner/vagrant && vagrant "$@")
+}
+
+c-up() {
+    vagcmd up
+}
+
+c-dn() {
+    vagcmd suspend
+}
+
+c-exec() {
+    (cd $BIGTOP_ROOT/provisioner/vagrant && CNO=$1 && shift && vagrant ssh bigtop$CNO -c "$*")
+}
+
+c-ssh() {
+    vagcmd ssh
+}
+
+get-host-port() {
+    case "$2" in
+        $C_WEBHDFS_NN_PORT)
+            expr "51070"
+        ;;
+        $C_WEBHDFS_DN_PORT)
+            expr 50075 + $1 "*" 1000
+        ;;
+        *)
+        echo Invalid port "$2" >&2
+        exit 2
+        ;;
+    esac
+}
+
+get-hostname() {
+    echo bigtop$1.vagrant
+}
+;;
+
+docker)
+
+c-up() {
+    true
+}
+
+c-dn() {
+    true
+}
+
 c-exec() {
     (cd $BIGTOP_ROOT/provisioner/docker && ./docker-hadoop.sh --exec "$@")
+}
+
+c-ssh() {
+    echo notsupported
+    false
 }
 
 get-host-port() {
     (cd $BIGTOP_ROOT/provisioner/docker && docker-compose -p `cat .provision_id` port --index=$1 bigtop $2)
 }
 
+get-hostname() {
+    #docker inspect --format {{.Config.Hostname}}.{{.Config.Domainname}} ${NODES[0]}
+    c-exec $1 hostname -f
+}
+;;
+*)
+    echo "Invalid PROVISIONER setting" >&2
+    exit 2
+esac
+
 #create NAT mappings
 create-natmap() {
     > $NATMAP
     for CN in `seq 1 $N_C` ; do
-        #docker inspect --format {{.Config.Hostname}}.{{.Config.Domainname}} ${NODES[0]}
-        C_HOSTNAME=`c-exec $CN hostname -f`
+        C_HOSTNAME=`get-hostname $CN`
         if [ $CN -eq 1 ] ; then #this is namenode
             NN_HOST_PORT=`get-host-port $CN $C_WEBHDFS_NN_PORT`
             if [ -z "$NN_HOST_PORT" ] ; then
@@ -221,15 +270,17 @@ create-args() {
     echo -n ${WRITESCRIPTOUT[*]} > $WRITESCRIPTFILE
     echo -n $HDFS_DIR/$TESTFILE > $SOURCEPATHFILE
     echo -n $HDFS_DIR/$TESTFILE_W > $TARGETPATHFILE
+    echo -n $HADOOP_USER > $USERFILE
     echo -n `stat -c "%s" $SOURCE` > $SIZEFILE
 }
 
 
 #put the test file to HDFS and a checksum file locally
+# "\>" makes redirection happen inside a container/VM
 upload() {
     c-exec 1 hdfs dfs -mkdir -p $HDFS_DIR
     c-exec 1 hdfs dfs -put -f $C_TESTDATA_DIR/$TESTFILE $HDFS_DIR
-    c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE > $CHECKSUMFILE
+    c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE \> $C_CHECKSUMFILE
 }
 
 clean-hdfs-w() {
@@ -265,7 +316,7 @@ prepare() {
 }
 
 cleanup() {
-    rm -f $TESTDATA_DIR/.prepared $SHASUMS $CHECKSUMFILE $NATMAP $ENTRYPOINT $SIZEFILE 
+    rm -f $TESTDATA_DIR/.prepared $SHASUMS $CHECKSUMFILE $NATMAP $ENTRYPOINT $USERFILE $SIZEFILE 
     rm -f $SOURCEPATHFILE $READSCRIPTFILE $TARGETPATHFILE $WRITESCRIPTFILE
     rm -f $SEGFILE_PREFIX* $WSEGFILE_PREFIX*
     clean-hdfs
@@ -276,20 +327,23 @@ validate-read() {
     then
         rm -f $SEGFILE_PREFIX*
     else
-        echo Checksum mismatch >&2
+        echo Read: Checksum mismatch >&2
         exit 2
     fi
 }
 
 validate-write() {
     local orig=(`cat $CHECKSUMFILE`)
-    local chal=(`c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE_W`)
+    # "\>" makes redirection happen inside a container/VM
+    c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE_W \> $C_CHAL_CHECKSUMFILE
+    local chal=(`cat $CHAL_CHECKSUMFILE`)
+    rm $CHAL_CHECKSUMFILE
     if [ "${orig[1]}" == "${chal[1]}" -a "${orig[2]}" == "${chal[2]}" ]
     then
         echo Write checksums Ok
-        c-exec 1 hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE_W
+        clean-hdfs-w
     else
-        echo HDFS Checksum mismatch >&2
+        echo Write: HDFS Checksum mismatch >&2
         echo Orig: ${orig[*]} >&2
         echo Chal: ${chal[*]} >&2
         exit 2
@@ -298,7 +352,8 @@ validate-write() {
 
 validate() {
     validate-read && 
-    validate-write
+    validate-write &&
+    echo "==================== TEST SUCCESSFUL ===================="
 }
 
 run-test() {
@@ -314,22 +369,31 @@ if [ -n "$IS_CYGWIN" -o -n "$IS_WSL" ] ; then
     export -f docker
     docker-compose() { docker-compose.exe "$@" | tr -d \\r ; }
     export -f docker-compose
+    vagrant() { vagrant.exe "$@" ; }
+    cargo() { cargo.exe "$@" ; }
 fi
 
 case "$1" in 
-    --help)
-        echo Usage
-        echo $0 --prepare [--force]
-        echo "    Uploads the testfile to hdfs, calculates checksums and other necessary data."
-        echo $0 --cleanup
-        echo "    Cleans up everything."
-        echo $0 --validate
-        echo "    Validates checksums of the files generated by the program being tested, against the reference checksums generated"
-        echo "    at the preparation step above."
-        echo $0 --run
-        echo "    Does --prepare, then runs the test with cargo, then does --validate"       
-        echo $0 --prepare-hdfs-part
-        echo "    Does partial preparation for just the Bigtop/HDFS part. Typically used after re-creating bigtop containers."
+    --help) cat <<EOF
+Usage
+$0 --prepare [--force]
+    Uploads the testfile to hdfs, calculates checksums and other necessary data.
+$0 --cleanup
+    Cleans up everything.
+$0 --validate
+    Validates checksums of the files generated by the program being tested, against the reference checksums generated
+    at the preparation step above.
+$0 --run
+    Does --prepare, then runs the test with cargo, then does --validate
+$0 --prepare-hdfs
+    Does partial preparation for just the Bigtop/HDFS part. Typically used after re-creating bigtop containers.
+$0 --cleanup-hdfs-w
+    Cleans up HDFS write file (typically, after a failed write test).
+$0 --c-exec <command>
+    Execute command inside 1st VM or container
+
+Additional Vagrant only commands: --c-up, --c-dn, --c-ssh
+EOF
         ;;
     --prepare)
         prepare $2
@@ -340,11 +404,23 @@ case "$1" in
     --validate)
         validate
         ;;
-    --run)
+    --run|--test)
         run-test
         ;;
-    --prepare-hdfs-part)
-        prepare-hdfs-part
+    --prepare-hdfs)
+        prepare-hdfs
+        ;;
+    --cleanup-hdfs-w)
+        clean-hdfs-w
+        ;;    
+    --c-up)    c-up ;;
+    --c-dn)    c-dn ;;
+    --c-exec)
+        shift
+        c-exec 1 "$*"
+        ;;
+    --c-ssh)
+        c-ssh
         ;;
     *)
         echo Invalid option $1 >&2
