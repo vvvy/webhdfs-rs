@@ -6,17 +6,28 @@ pub(crate) enum Op {
     GETFILESTATUS,
     OPEN,
     CREATE,
-    APPEND
+    APPEND,
+    CONCAT,
+    MKDIRS,
+    RENAME,
+    CREATESYMLINK,
+    DELETE
 }
 
 impl Op {
     pub(crate) fn op_string(&self) -> &'static str {
+        use self::Op::*;
         match self {
-            Op::LISTSTATUS => "LISTSTATUS",
-            Op::GETFILESTATUS => "GETFILESTATUS",
-            Op::OPEN => "OPEN",
-            Op::CREATE => "CREATE",
-            Op::APPEND => "APPEND"
+            LISTSTATUS => "LISTSTATUS",
+            GETFILESTATUS => "GETFILESTATUS",
+            OPEN => "OPEN",
+            CREATE => "CREATE",
+            APPEND => "APPEND",
+            CONCAT => "CONCAT",
+            MKDIRS => "MKDIRS",
+            RENAME => "RENAME",
+            CREATESYMLINK => "CREATESYMLINK",
+            DELETE => "DELETE"
         }
     }
 }
@@ -37,20 +48,33 @@ pub(crate) enum OpArg {
     /// `[&replication=<SHORT>]`
     Replication(i16),
     /// `[&permission=<OCTAL>]`
-    Permission(u16)
+    Permission(u16),
+    /// `&sources=<PATHS>`
+    Sources(Vec<String>),
+    /// `&destination=<PATH>`
+    Destination(String),
+    /// `[&createParent=<true|false>]`
+    CreateParent(bool),
+    /// `[&recursive=<true|false>]`
+    Recursive(bool)
 }
 
 impl OpArg {
     /// add to an url's query string
     pub(crate) fn add_to_url(&self, qe: QueryEncoder) -> QueryEncoder {
+        use self::OpArg::*;
         match self {
-            OpArg::Offset(v) => qe.add_pi("offset", *v),
-            OpArg::Length(v) => qe.add_pi("length", *v),
-            OpArg::BufferSize(v) => qe.add_pi("buffersize", *v as i64),
-            OpArg::Overwrite(v) => qe.add_pb("overwrite", *v),
-            OpArg::Blocksize(v) => qe.add_pi("blocksize", *v),
-            OpArg::Replication(v) => qe.add_pi("replication", *v as i64),
-            OpArg::Permission(v) => qe.add_po("permission", *v),
+            Offset(v) => qe.add_pi("offset", *v),
+            Length(v) => qe.add_pi("length", *v),
+            BufferSize(v) => qe.add_pi("buffersize", *v as i64),
+            Overwrite(v) => qe.add_pb("overwrite", *v),
+            Blocksize(v) => qe.add_pi("blocksize", *v),
+            Replication(v) => qe.add_pi("replication", *v as i64),
+            Permission(v) => qe.add_po("permission", *v),
+            Sources(v) => qe.add_pv("sources", &v.join(",")),
+            Destination(v)=> qe.add_pv("destination", v),
+            CreateParent(v) => qe.add_pb("createParent", *v),
+            Recursive(v) => qe.add_pb("recursive", *v),
         }
     }
 }
@@ -61,6 +85,7 @@ macro_rules! opt {
     };
 }
 
+/// Define option setters in the option builder
 macro_rules! opts {
     // `[&offset=<LONG>]`
     (offset) => { opt! { offset, i64, Offset } };
@@ -76,6 +101,10 @@ macro_rules! opts {
     (permission) => { opt! { permission, u16, Permission } };
     // `[&buffersize=<INT>]`
     (buffersize) => { opt! { buffersize, i32, BufferSize } };
+    // `[&createParent=<true|false>]`
+    (create_parent) => { opt! { create_parent, bool, CreateParent } };
+    // `[&recursive=<true|false>]`
+    (recursive) => { opt! { recursive, bool, Recursive } };
 }
 
 macro_rules! op_builder {
@@ -101,4 +130,13 @@ op_builder! { CreateOptions => overwrite, blocksize, replication, permission, bu
 //curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=APPEND[&buffersize=<INT>]"
 op_builder! { AppendOptions => buffersize }
 
+//curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=MKDIRS[&permission=<OCTAL>]"
+op_builder! { MkdirsOptions => permission }
 
+//curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CREATESYMLINK
+//                      &destination=<PATH>[&createParent=<true|false>]"
+op_builder! { CreateSymlinkOptions => create_parent }
+
+//curl -i -X DELETE "http://<host>:<port>/webhdfs/v1/<path>?op=DELETE
+//                      [&recursive=<true|false>]"
+op_builder! { DeleteOptions => recursive }

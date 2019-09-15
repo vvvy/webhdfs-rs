@@ -77,12 +77,39 @@ impl SyncHdfsClient {
         self.rt.borrow_mut().block_on(with_timeout(f, self.acx.default_timeout().clone()))
     }
 
+    /// Get directory listing
     pub fn dir(&self, path: &str) -> Result<ListStatusResponse> {
         self.exec(self.acx.dir(path))
     }
 
+    /// Stat a file /dir
     pub fn stat(&self, path: &str) -> Result<FileStatusResponse> {
         self.exec(self.acx.stat(path))
+    }
+
+    /// Concat File(s)
+    pub fn concat(&self, path: &str, paths: Vec<String>) -> Result<()> {
+        self.exec(self.acx.concat(path, paths))
+    }
+
+    /// Make a Directory
+    pub fn mkdirs(&self, path: &str, opts: MkdirsOptions) -> Result<()> {
+        self.exec(self.acx.mkdirs(path, opts))
+    }
+
+    /// Rename a file/directory
+    pub fn rename(&self, path: &str, destination: String) -> Result<()> {
+        self.exec(self.acx.rename(path, destination))
+    }
+
+    /// Create a Symbolic Link
+    pub fn create_symlink(&self, path: &str, destination: String, opts: CreateSymlinkOptions) ->  Result<()> {
+        self.exec(self.acx.create_symlink(path, destination, opts))
+    }
+
+    /// Delete a File/Directory
+    pub fn delete(&self, path: &str, opts: DeleteOptions) -> Result<()> {
+        self.exec(self.acx.delete(path, opts))
     }
 }
 
