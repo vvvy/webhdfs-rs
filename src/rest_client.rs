@@ -2,9 +2,10 @@ use futures::{Future, Stream};
 
 use http::{uri::Scheme, request::Builder as RequestBuilder, method::Method};
 use hyper::{
-    Request, Response, Body, Uri, Chunk,
+    Request, Response, Body, Uri,
     client::{Client, ResponseFuture, HttpConnector}
 };
+use bytes::Bytes;
 use hyper_tls::HttpsConnector;
 use mime::Mime;
 use crate::error::*;
@@ -118,8 +119,8 @@ where R: serde::de::DeserializeOwned + Send {
 }
 
 #[inline]
-fn extract_binary(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Stream<Item=Chunk, Error=Error> + Send {
-    f.map(|res|res.into_body().from_err()).flatten_stream()
+fn extract_binary(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Stream<Item=Bytes, Error=Error> + Send {
+    f.map(|res|res.into_body().from_err()).flatten_stream().map(|c| c.into_bytes())
 }
 
 #[inline]
@@ -285,7 +286,7 @@ impl HttpyClient {
         f2
     }
 
-    pub fn get_binary(self) -> impl Stream<Item=Chunk, Error=Error> + Send {
+    pub fn get_binary(self) -> impl Stream<Item=Bytes, Error=Error> + Send {
         let f0 = self.request_with_redirect( 
             |uri| HttpxClient::new_get_like(uri, Method::GET), 
             |uri| HttpxClient::new_get_like(uri, Method::GET)

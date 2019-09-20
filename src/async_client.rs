@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use http::{Uri, uri::Parts as UriParts, Method};
 use futures::{Future, Stream};
+use bytes::Bytes;
 
 use crate::uri_tools::*;
 use crate::natmap::{NatMap, NatMapPtr};
@@ -134,7 +135,7 @@ impl HdfsClient {
     }
 
     /// Read file data
-    pub fn open(&self, path: &str, opts: OpenOptions) -> impl Stream<Item=hyper::body::Chunk, Error=Error> + Send {
+    pub fn open(&self, path: &str, opts: OpenOptions) -> impl Stream<Item=Bytes, Error=Error> + Send {
         let natmap = self.natmap();
         self.uri_result(path, Op::OPEN, opts.into())
             .map(|uri| HttpyClient::new(uri, natmap).get_binary())
