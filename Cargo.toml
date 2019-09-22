@@ -1,6 +1,6 @@
 [package]
 name = "webhdfs"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Valery Vybornov <vvybornov@gmail.com>"]
 edition = "2018"
 
@@ -30,3 +30,6 @@ toml = "0.5"
 default = ["zero-copy-on-write"]
 zero-copy-on-write = []
 
+[badges]
+travis-ci = { repository = "https://travis-ci.org/vvvy/webhdfs-rs" }
+maintenance = { status = "actively-developed" }
