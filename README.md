@@ -7,7 +7,7 @@ Hadoop webhdfs client library for Rust.
 * Built on Tokio and Hyper. 
 * Provides both synchronous and asynchronous APIs.
 
-See [`tests/it.rs`](tests/it.rs) for usage examples.
+See  [`src/bin/webhdfs.rs`](src/bin/webhdfs.rs) or [`tests/it.rs`](tests/it.rs) for usage examples.
 
 NOTE: This is a work in progress. 
 

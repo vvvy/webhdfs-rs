@@ -5,8 +5,7 @@ use webhdfs::{*, sync_client::*};
 
 use std::fs::{File, read};
 use std::path::Path;
-use std::io::{Read, Write, Seek, SeekFrom, BufRead, BufReader};
-use std::collections::HashMap;
+use std::io::{Read, Write, Seek, SeekFrom};
 use std::convert::TryInto;
 
 
@@ -32,18 +31,7 @@ fn webhdfs_test() {
     let target = file_as_string("./test-data/target");
     let user = file_as_string("./test-data/user");
     let size = file_as_string("./test-data/size").parse::<i64>().unwrap();
-
-    let f = File::open("./test-data/natmap").expect("cannot open natmap");
-    let f = BufReader::new(f);
-
-    let natmap: HashMap<String, String> = f.lines().map(
-        |l| {
-            let w = l.expect("cannot read natmap line");
-            let mut x = w.splitn(2, "=");
-            let a = x.next().expect("cannot read natmap line f1").to_owned();
-            let b = x.next().expect("cannot read natmap line f2").to_owned();
-            (a, b)
-        }).collect();
+    let natmap = crate::config::read_kv_file("./test-data/natmap").expect("cannot read natmap");
 
     println!("
 entrypoint='{e}'

@@ -11,6 +11,7 @@ use std::rc::Rc;
 use http::Uri;
 use tokio::runtime::current_thread::Runtime;
 use futures::{Future, Stream};
+use bytes::Bytes;
 use crate::error::*;
 use crate::datatypes::*;
 use crate::async_client::*;
@@ -36,6 +37,9 @@ impl SyncHdfsClientBuilder {
     pub fn from_config() -> Self { 
         Self { a: HdfsClientBuilder::from_config() } 
     }
+    pub fn from_config_opt() -> Option<Self> { 
+        HdfsClientBuilder::from_config_opt().map(|a| Self { a })
+    }
     pub fn natmap(self, natmap: NatMap) -> Self {
         Self { a: self.a.natmap(natmap), ..self }
     }
@@ -44,6 +48,9 @@ impl SyncHdfsClientBuilder {
     }
     pub fn user_name(self, user_name: String) -> Self {
         Self { a: self.a.user_name(user_name), ..self }
+    }
+    pub fn doas(self, doas: String) -> Self {
+        Self { a: self.a.doas(doas), ..self }
     }
     pub fn delegation_token(self, dt: String) -> Self {
         Self { a: self.a.delegation_token(dt), ..self }
@@ -76,6 +83,33 @@ impl SyncHdfsClient {
 
         self.rt.borrow_mut().block_on(with_timeout(f, self.acx.default_timeout().clone()))
     }
+
+    fn save_stream<W: Write>(&self, mut input: impl Stream<Item=Bytes, Error=Error>, output: &mut W) -> Result<()> {
+        fn write_bytes<W: Write>(b: &Bytes, w: &mut W) -> Result<()> {
+            if w.write(&b)? != b.len() {
+                Err(app_error!(generic "Short write"))
+            } else {
+                Ok(())
+            }
+        }
+
+        loop {
+            let f = input.into_future().map_err(|(e, _)| e);
+            let (ob, input2) = self.exec(f)?;
+            match ob {
+                Some(bytes) => write_bytes(&bytes, output)?,
+                None => break Ok(())
+            }
+            input = input2;
+        }        
+    }
+
+    /// Get a file (read it from hdfs and save to local fs)
+    pub fn get_file<W: Write>(&self, input: &str, output: &mut W) -> Result<()> {
+        let s = self.acx.open(input, OpenOptions::new());
+        self.save_stream(s, output)
+    }
+
 
     /// Get directory listing
     pub fn dir(&self, path: &str) -> Result<ListStatusResponse> {

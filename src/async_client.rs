@@ -13,6 +13,8 @@ use crate::error::*;
 use crate::rest_client::{HttpyClient, Data, data_empty};
 use crate::datatypes::*;
 use crate::op::*;
+use crate::config::*;
+
 
 
 //--------------------------------------------------------
@@ -44,10 +46,9 @@ impl HdfsClientBuilder {
                 dt: None
         }  } 
     }
-    /// Creates new builder, filled with the configuration read from the configuration files.
-    /// See comments at `crate::config` for detailed semantics.
-    pub fn from_config() -> Self {
-        let conf = crate::config::read_config();
+
+    /// Creates new builder from the specified configuration
+    pub fn from_explicit_config(conf: Config) -> Self {
         Self { c: HdfsClient {
                 entrypoint: 
                     conf.entrypoint.into_uri().into_parts(),
@@ -61,8 +62,18 @@ impl HdfsClientBuilder {
                     conf.doas,
                 dt: 
                     conf.dt
-        }  }        
+        }  } 
     }
+
+    /// Creates new builder, filled with the configuration read from configuration files.
+    /// See comments at `crate::config` for detailed semantics.
+    pub fn from_config() -> Self { Self::from_explicit_config(read_config()) }
+
+    /// Creates new builder, filled with the configuration read from configuration files, 
+    /// if those have been found. Returns `None` otherwise. Note that invalid configuration files
+    /// casuse panic rather than returning `None`.
+    pub fn from_config_opt() -> Option<Self> { read_config_opt().map(Self::from_explicit_config) }
+
     pub fn natmap(self, natmap: NatMap) -> Self {
         Self { c: HdfsClient { natmap: NatMapPtr::new(natmap), ..self.c } }
     }

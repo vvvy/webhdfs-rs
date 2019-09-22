@@ -16,8 +16,11 @@
 //! 
 use std::fs::read;
 use std::path::Path;
+use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
+use std::collections::HashMap;
 use http::Uri;
+
 
 use crate::error::*;
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
@@ -56,6 +59,29 @@ pub struct Config {
     pub user_name: Option<String>,
     pub doas: Option<String>,
     pub dt: Option<String>
+}
+
+impl Config {
+    pub fn new(uri: Uri) -> Self {
+        Self { 
+            entrypoint: UriW::new(uri), 
+            default_timeout: None,
+            user_name: None,
+            doas: None,
+            dt: None
+        }
+    }
+}
+
+#[test]
+fn test_config() {
+    let cfg_str = br#"
+entrypoint="http://localhost:7000"
+duration="10s"
+user_name="us"
+"#;
+    let c: Config = toml::from_slice(cfg_str).unwrap();
+    assert_eq!(c.entrypoint.uri, "http://localhost:7000")
 }
 
 #[cfg(windows)]
@@ -107,10 +133,13 @@ fn read_env_config() -> Result<Option<Config>> {
 }
 
 pub fn read_config() -> Config {
+    read_config_opt().expect("No valid configuration file has been found")
+}
+
+pub fn read_config_opt() -> Option<Config> {
     read_env_config().expect("Configuration error (file specified by WEBHDFS_CONFIG environment var)")
     .or(read_local_config().expect("Configuration error (webhdfs.toml in CWD)"))
     .or(read_user_config().expect("Configuration error (.webhdfs.toml in homedir)"))
-    .expect("No valid configuration file has been found")
 }
 
 pub fn write_config(path: &Path, c: &Config, new_file: bool) {
@@ -123,7 +152,7 @@ pub fn write_config(path: &Path, c: &Config, new_file: bool) {
         .unwrap();
     f.write_all(&toml::to_vec(c).unwrap()).unwrap();
 }
-
+/*
 pub fn write_sample_config() {
     let c = Config {
         entrypoint: UriW::new("http://namenode.hdfs.intra:50070".parse().unwrap()),
@@ -134,3 +163,50 @@ pub fn write_sample_config() {
     };
     write_config(&Path::new("template.webhdfs.toml"), &c, false)
 }
+*/
+
+/// Splits a "key=value" string in two parts
+/// ```
+/// use webhdfs::config::split_kv;
+/// assert_eq!(split_kv("key=Value".to_owned()).unwrap(), ("key".to_owned(), "Value".to_owned()))
+/// ```
+#[inline]
+pub fn split_kv(l: String) -> Result<(String, String)> {
+    let mut fs = l.splitn(2, "=");
+    let a = fs.next().ok_or_else(|| app_error!(generic "cannot read entry key: {}", l))?.to_owned();
+    let b = fs.next().ok_or_else(|| app_error!(generic "cannot read entry value: {}", l))?.to_owned();
+    Ok((a, b))
+}
+
+
+/// Reads an object consisting of "key=value" pairs
+#[inline]
+pub fn read_kv_lines<R: Read>(r: R) -> Result<HashMap<String, String>> {
+    //let f = File::open(path).aerr("cannot open natmap")?;
+    let f = BufReader::new(r);
+    let r = f.lines().map(|l| {
+        let ln = l.aerr("cannot read natmap line")?;
+        split_kv(ln)
+    });
+    r.collect()
+}
+
+#[test]
+fn test_read_kv_lines() {
+    let input = b"\
+bigtop1.vagrant:50070=localhost:51070
+bigtop1.vagrant:50075=localhost:51075
+";
+    let r = read_kv_lines(&input[..]).unwrap();
+    assert_eq!(r.get("bigtop1.vagrant:50070").map(|r| r.as_ref()), Some("localhost:51070"));
+    assert_eq!(r.get("bigtop1.vagrant:50075").map(|r| r.as_ref()), Some("localhost:51075"));
+}
+
+
+#[inline]
+pub fn read_kv_file(path: &str) -> Result<HashMap<String, String>> {
+    read_kv_lines(std::fs::File::open(path).aerr("cannot open natmap")?)
+}
+
+
+
