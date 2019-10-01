@@ -49,11 +49,14 @@ impl HdfsClientBuilder {
 
     /// Creates new builder from the specified configuration
     pub fn from_explicit_config(conf: Config) -> Self {
+        let natmap = conf.natmap.map(
+            |natmap| NatMapPtr::new(NatMap::new(natmap.into_iter()).expect("cannot build natmap"))
+        ).unwrap_or_else(|| NatMapPtr::empty());
         Self { c: HdfsClient {
                 entrypoint: 
                     conf.entrypoint.into_uri().into_parts(),
                 natmap: 
-                    NatMapPtr::empty(),
+                    natmap,
                 default_timeout: 
                     conf.default_timeout.unwrap_or_else(|| Duration::from_secs(Self::DEFAULT_TIMEOUT_S)),
                 user_name: 

@@ -9,9 +9,7 @@ Hadoop webhdfs client library for Rust.
 
 See  [`src/bin/webhdfs.rs`](src/bin/webhdfs.rs) or [`tests/it.rs`](tests/it.rs) for usage examples.
 
-NOTE: This is a work in progress. 
-
-NOTE: This is an Alpha phase software. API could change towards version 1.0.
+NOTE: APIs are not yet stabilized and may change towards version 1.0.
 
 TODO list (2nd checkbox is IT coverage)
 

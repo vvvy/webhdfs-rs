@@ -152,6 +152,13 @@ Transfer-Encoding: chunked
 }
 */
 
+/// Value of `FileStatus.type` corresponding to a regular file (`"FILE"`)
+pub const FT_FILE: &'static str = "FILE";
+/// Value of `FileStatus.type` corresponding to a directory (`"DIRECTORY"`)
+pub const FT_DIRECTORY: &'static str = "DIRECTORY";
+/// Value of `FileStatus.type` corresponding to a symbolic link (`"SYMLINK"`)
+pub const FT_SYMLINK: &'static str = "SYMLINK";
+
 #[derive(Debug, Deserialize)]
 pub struct FileStatusResponse {
     #[serde(rename="FileStatus")]

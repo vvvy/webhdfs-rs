@@ -58,7 +58,8 @@ pub struct Config {
     pub default_timeout: Option<Duration>,
     pub user_name: Option<String>,
     pub doas: Option<String>,
-    pub dt: Option<String>
+    pub dt: Option<String>,
+    pub natmap: Option<HashMap<String, String>>
 }
 
 impl Config {
@@ -68,7 +69,8 @@ impl Config {
             default_timeout: None,
             user_name: None,
             doas: None,
-            dt: None
+            dt: None,
+            natmap: None
         }
     }
 }
@@ -133,7 +135,7 @@ fn read_env_config() -> Result<Option<Config>> {
 }
 
 pub fn read_config() -> Config {
-    read_config_opt().expect("No valid configuration file has been found")
+    read_config_opt().expect("No valid webhdfs configuration file has been found")
 }
 
 pub fn read_config_opt() -> Option<Config> {

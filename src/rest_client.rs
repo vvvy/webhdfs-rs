@@ -8,6 +8,7 @@ use hyper::{
 use bytes::Bytes;
 use hyper_tls::HttpsConnector;
 use mime::Mime;
+use log::trace;
 use crate::error::*;
 use crate::datatypes::RemoteExceptionResponse;
 use crate::natmap::NatMapPtr;
@@ -113,19 +114,24 @@ fn ensure_ct(ct_required: RCT, f: impl Future<Item=Response<Body>, Error=Error> 
 #[inline]
 fn extract_json<R>(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Future<Item=R, Error=Error> + Send
 where R: serde::de::DeserializeOwned + Send {
-    f.and_then(|res|
+    f.and_then(|res| {
+        trace!("HTTP JSON Response {} ct={:?} cl={:?}", res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH));
         res.into_body().concat2().from_err().and_then(|body| serde_json::from_slice(&body).aerr("JSON deseriaization error"))
-    )
+    })
 }
 
 #[inline]
 fn extract_binary(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Stream<Item=Bytes, Error=Error> + Send {
-    f.map(|res|res.into_body().from_err()).flatten_stream().map(|c| c.into_bytes())
+    f.map(|res| {
+        trace!("HTTP Binary Response {} ct={:?} cl={:?}", res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH));
+        res.into_body().from_err()
+    }).flatten_stream().map(|c| c.into_bytes())
 }
 
 #[inline]
 fn extract_empty(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Future<Item=(), Error=Error> + Send {
-    f.and_then(|res|
+    f.and_then(|res| {
+        trace!("HTTP Empty Response {} ct={:?} cl={:?}", res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH));
         res.into_body().concat2().from_err().and_then(|body| 
             if body.is_empty() {
                 futures::future::ok(())
@@ -133,7 +139,7 @@ fn extract_empty(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> imp
                 futures::future::err(app_error!(generic "Unexpected non-empty response received, where empty is expected"))
             }
         )
-    )
+    })
 }
 
 #[inline]
@@ -198,6 +204,7 @@ impl HttpxClient
 
     #[inline]
     fn create_request(&self, method: Method, uri: Uri) -> RequestBuilder {
+        trace!("{} {}", method, uri);
         let mut r = RequestBuilder::new();
         r.method(method).uri(uri);
         r
