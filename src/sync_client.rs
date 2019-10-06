@@ -127,12 +127,12 @@ impl SyncHdfsClient {
     }
 
     /// Make a Directory
-    pub fn mkdirs(&self, path: &str, opts: MkdirsOptions) -> Result<()> {
+    pub fn mkdirs(&self, path: &str, opts: MkdirsOptions) -> Result<bool> {
         self.exec(self.acx.mkdirs(path, opts))
     }
 
     /// Rename a file/directory
-    pub fn rename(&self, path: &str, destination: String) -> Result<()> {
+    pub fn rename(&self, path: &str, destination: String) -> Result<bool> {
         self.exec(self.acx.rename(path, destination))
     }
 
@@ -142,7 +142,7 @@ impl SyncHdfsClient {
     }
 
     /// Delete a File/Directory
-    pub fn delete(&self, path: &str, opts: DeleteOptions) -> Result<()> {
+    pub fn delete(&self, path: &str, opts: DeleteOptions) -> Result<bool> {
         self.exec(self.acx.delete(path, opts))
     }
 }
@@ -242,6 +242,8 @@ impl WriteHdfsFile {
     pub fn append(cx: SyncHdfsClient, path: String, opts: AppendOptions) -> Result<WriteHdfsFile> {
         Ok(Self { cx, path, opts })
     }
+    /// Splits self into `(sync_client, path, (pos, len))`
+    pub fn into_parts(self) -> (SyncHdfsClient, String) { (self.cx, self.path) }
 
     ///zero-copy write (work around tokio's lack of support for scoped threading)
     #[cfg(feature = "zero-copy-on-write")]

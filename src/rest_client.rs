@@ -313,6 +313,25 @@ impl HttpyClient {
         let f2 = extract_empty(f1);
         f2
     }
+
+    /// No input, JSON output
+    pub fn op_json<R>(self, method: Method) -> impl Future<Item=R, Error=Error> + Send 
+     where R: serde::de::DeserializeOwned + Send + 'static{
+        let method1 = method.clone(); 
+        let f0 = self.request_with_redirect(
+            |uri| HttpxClient::new_get_like(uri, method1), 
+            move |uri| HttpxClient::new_post_like(uri, method, data_empty())
+        );
+        let f1 = ensure_ct(RCT::JSON, f0);
+        let f2 = extract_json(f1);
+        f2
+    }
+
+    /// No input, no output
+    pub fn op_empty(self, method: Method) -> impl Future<Item=(), Error=Error> + Send {
+        self.post_binary(method, data_empty())
+    }
+    
 }
 
 

@@ -25,25 +25,13 @@ fn webhdfs_test() {
     }
 
     let entrypoint = file_as_string("./test-data/entrypoint");
-    let readscript = file_as_string("./test-data/readscript");
-    let writescript = file_as_string("./test-data/writescript");
-    let source = file_as_string("./test-data/source");
-    let target = file_as_string("./test-data/target");
-    let user = file_as_string("./test-data/user");
-    let size = file_as_string("./test-data/size").parse::<i64>().unwrap();
     let natmap = crate::config::read_kv_file("./test-data/natmap").expect("cannot read natmap");
-
+    let user = file_as_string("./test-data/user");
     println!("
 entrypoint='{e}'
-source='{s}'
-readscript='{r}'
-target='{t}'
-writescript='{w}'
 natmap={n:?}
-user={u}
-size={z}", 
-e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap, u=user, z=size);
-
+user={u}", 
+e=entrypoint, n=natmap, u=user);
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
     let entrypoint_uri = "http://".to_owned() + &entrypoint;
     let cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
@@ -51,7 +39,19 @@ e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap, u=user,
         .user_name(user)
         .build()
         .expect("cannot HdfsContext::new");
-
+ 
+    let readscript = file_as_string("./test-data/readscript");
+    let writescript = file_as_string("./test-data/writescript");
+    let source = file_as_string("./test-data/source");
+    let target = file_as_string("./test-data/target");
+    let size = file_as_string("./test-data/size").parse::<i64>().unwrap();
+    println!("
+source='{s}'
+readscript='{r}'
+target='{t}'
+writescript='{w}'
+size={z}", 
+s=source, r=readscript, t=target, w=writescript, z=size);
     let (source_dir, source_sfn) = source.split_at(source.rfind('/').expect("source does not contain '/'"));
     let (_, source_fn) = source_sfn.split_at(1);
 
@@ -66,7 +66,10 @@ e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap, u=user,
     //}] } })
     let dir_resp = cx.dir(source_dir);
     println!("Dir: {:?}", dir_resp);
-    assert_eq!(source_fn, dir_resp.unwrap().file_statuses.file_status[0].path_suffix);
+    //assert_eq!(source_fn, dir_resp.unwrap().file_statuses.file_status[0].path_suffix);
+    dir_resp.unwrap().file_statuses.file_status.into_iter().find(|fs| fs.path_suffix == source_fn)
+    .ok_or("cannot find sourcefile in hdfs")
+    .unwrap();
 
     let stat_resp = cx.stat(&source);
     println!("Stat: {:?}", stat_resp);
@@ -128,11 +131,11 @@ e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap, u=user,
         }
     }
 
-    let (c,_,_) = file.into_parts();
+    let (cx,_,_) = file.into_parts();
 
     println!("Write test");
     let files = writescript.split(' ').filter(|e| !e.is_empty()).collect::<Vec<&str>>();
-    let mut file = WriteHdfsFile::create(c, target.clone(), CreateOptions::new(), AppendOptions::new()).unwrap();
+    let mut file = WriteHdfsFile::create(cx, target.clone(), CreateOptions::new(), AppendOptions::new()).unwrap();
     let mut count = 0usize;
 
     for file_name in files {
@@ -143,6 +146,23 @@ e=entrypoint, s=source, r=readscript, t=target, w=writescript, n=natmap, u=user,
     }
 
     assert_eq!(count, size as usize);
+
+    let (cx,_) = file.into_parts();
+
+    //MKDIRS/DELETE(dir) test
+    let dir_to_make = file_as_string("./test-data/dir-to-make");
+    cx.mkdirs(&dir_to_make, MkdirsOptions::new()).expect("mkdirs");
+    let mkdirs_stat_resp = cx.stat(&dir_to_make);
+    //println!("Mkdirs Stat: {:?}", mkdirs_stat_resp);
+    assert_eq!(dirent_type::DIRECTORY, mkdirs_stat_resp.unwrap().file_status.type_);
+
+    let dir_to_remove= file_as_string("./test-data/dir-to-remove");
+    let rmdir_stat_resp = cx.stat(&dir_to_remove);
+    //println!("Stat: {:?}", rmdir_stat_resp);
+    assert_eq!(dirent_type::DIRECTORY, rmdir_stat_resp.unwrap().file_status.type_);
+    cx.delete(&dir_to_remove, DeleteOptions::new()).expect("delete (dir)");
+    let x = cx.stat(&dir_to_remove).expect_err("delete(dir) failed");
+    println!("{}", x);
 
     //if do_itt { run_shell("./itt.sh --validate", "Validation failed"); }
 

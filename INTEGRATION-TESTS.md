@@ -13,7 +13,7 @@ DISCLAIMER: the integration tests were developed on a Windows 10 machine (using 
 * For vagrant, you will need Virtualbox (other providers are untested). 
 * Under Windows you will also need Cygwin or WSL. Cygwin is recommended if Docker is used with Bigtop provisioner 
 (because of docker to windows console interop issues), while WSL is recommended for Vagrant.
-2. Check out Bigtop. version 1.3 was used (`rel/1.3` tag).
+2. Check out Bigtop. Bigtop Version 1.3 was used (`rel/1.3` tag). Bigtop 1.3 has Hadoop version 2.8.4.
 3. Create a file named `itt-config.sh` in the webhdfs source root, and make it `chmod +x`. This is the test configuration script.
 4. Set `BIGTOP_ROOT` var to the root path of the cloned Bigtop repo. It must be set in the test config script. 
 5. Edit Bigtop provisioner configuration to make guest webhdfs ports 50070 and 50075 accessible from the host, and

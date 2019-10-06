@@ -10,7 +10,7 @@ use crate::uri_tools::*;
 use crate::natmap::{NatMap, NatMapPtr};
 
 use crate::error::*;
-use crate::rest_client::{HttpyClient, Data, data_empty};
+use crate::rest_client::{HttpyClient, Data};
 use crate::datatypes::*;
 use crate::op::*;
 use crate::config::*;
@@ -136,6 +136,25 @@ impl HdfsClient {
         self.uri_result(path, op, args).and_then(|uri| HttpyClient::new(uri, natmap).post_binary(method, data))
     }
 
+    #[inline]
+    fn data_op_b(&self, method: Method, path: &str, op: Op, args: Vec<OpArg>) 
+    -> impl Future<Item=bool, Error=Error> + Send {
+        let natmap = self.natmap();
+        self
+            .uri_result(path, op, args)
+            .and_then(|uri| HttpyClient::new(uri, natmap).op_json(method))
+            .map(|b: Boolean| b.boolean)
+    }
+
+    #[inline]
+    fn data_op_e(&self, method: Method, path: &str, op: Op, args: Vec<OpArg>) 
+    -> impl Future<Item=(), Error=Error> + Send {
+        let natmap = self.natmap();
+        self
+            .uri_result(path, op, args)
+            .and_then(|uri| HttpyClient::new(uri, natmap).op_empty(method))
+    }
+
     pub(crate) fn default_timeout(&self) -> &Duration { &self.default_timeout }
 
     /// Get directory listing
@@ -173,19 +192,19 @@ impl HdfsClient {
     /// Concatenate files
     pub fn concat(&self, path: &str, paths: Vec<String>) -> impl Future<Item=(), Error=Error> + Send {
         //curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CONCAT&sources=<PATHS>"
-        self.data_op(Method::POST, path, Op::CONCAT, vec![OpArg::Sources(paths)], data_empty())
+        self.data_op_e(Method::POST, path, Op::CONCAT, vec![OpArg::Sources(paths)])
     }
 
     /// Make a directory
-    pub fn mkdirs(&self, path: &str, opts: MkdirsOptions) -> impl Future<Item=(), Error=Error> + Send {
+    pub fn mkdirs(&self, path: &str, opts: MkdirsOptions) -> impl Future<Item=bool, Error=Error> + Send {
         //curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=MKDIRS[&permission=<OCTAL>]"
-        self.data_op(Method::PUT, path, Op::MKDIRS, opts.into(), data_empty())
+        self.data_op_b(Method::PUT, path, Op::MKDIRS, opts.into())
     }
 
     /// Rename a file/directory
-    pub fn rename(&self, path: &str, destination: String) -> impl Future<Item=(), Error=Error> + Send {
+    pub fn rename(&self, path: &str, destination: String) -> impl Future<Item=bool, Error=Error> + Send {
         //curl -i -X PUT "<HOST>:<PORT>/webhdfs/v1/<PATH>?op=RENAME&destination=<PATH>"
-        self.data_op(Method::PUT, path, Op::RENAME, vec![OpArg::Destination(destination)], data_empty())
+        self.data_op_b(Method::PUT, path, Op::RENAME, vec![OpArg::Destination(destination)])
     }
 
     /// Create a Symbolic Link
@@ -194,13 +213,13 @@ impl HdfsClient {
         //                      &destination=<PATH>[&createParent=<true|false>]"
         let mut o = vec![OpArg::Destination(destination)];
         o.append(&mut opts.into());
-        self.data_op(Method::PUT, path, Op::CREATESYMLINK, o, data_empty())
+        self.data_op_e(Method::PUT, path, Op::CREATESYMLINK, o)
     }
 
     /// Delete a File/Directory
-    pub fn delete(&self, path: &str, opts: DeleteOptions) -> impl Future<Item=(), Error=Error> + Send {
+    pub fn delete(&self, path: &str, opts: DeleteOptions) -> impl Future<Item=bool, Error=Error> + Send {
         //curl -i -X DELETE "http://<host>:<port>/webhdfs/v1/<path>?op=DELETE
         //                      [&recursive=<true|false>]"
-        self.data_op(Method::DELETE, path, Op::DELETE, opts.into(), data_empty())
+        self.data_op_b(Method::DELETE, path, Op::DELETE, opts.into())
     }
 }

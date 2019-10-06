@@ -23,7 +23,6 @@ TODO list (2nd checkbox is IT coverage)
 - [ ] `[ ]` Snapshot operations
 - [X] `[ ]` Basic delegation token support
 - [ ] `[ ]` Full delegation token support
-- [ ] `[ ]` Hadoop 2.7+
 - [ ] `[ ]` webhdfs tool
 
 ## Building and testing
