@@ -1,4 +1,21 @@
 //! Hadoop WebHDFS API for Rust
+//! 
+//! Quick start: 
+//! 
+//! ```no_run
+//! use webhdfs::*;
+//! use webhdfs::sync_client::ReadHdfsFile;
+//! use std::io::Read;
+//! 
+//! let cx = SyncHdfsClientBuilder::new("http://namenode:50070".parse().unwrap())
+//!     .user_name("johnd".to_owned())
+//!     .build().unwrap();
+//! 
+//! let mut file = ReadHdfsFile::open(cx, "/user/johnd/in.txt".to_owned()).unwrap();
+//! let mut buf = [0u8; 100];
+//! let _ = file.read(&mut buf).unwrap();
+//! 
+//! ```
 
 #[macro_use] 
 mod error;

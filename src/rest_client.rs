@@ -338,7 +338,7 @@ impl HttpyClient {
 
 
 //-----------------------------------------------------------------------------------------------------------
-
+/*
 #[cfg(test)]
 mod client_tests {
     use crate::rest_client::*;
@@ -357,6 +357,8 @@ mod client_tests {
         expression: String,
         result: String
     }
+
+    
     #[test]
     fn test_get_s() {
         let uri = "https://newton.now.sh/factor/x%5E2-1".parse().unwrap();
@@ -369,3 +371,4 @@ mod client_tests {
         println!("{:?}", res);
     }
 }
+*/

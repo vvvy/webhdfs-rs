@@ -34,3 +34,7 @@ cargo test --lib -- --nocapture
 ## Integration tests
 
 See [Integration tests](INTEGRATION-TESTS.md)
+
+## Changelog
+
+See [CHANGES.md](CHANGES.md)
