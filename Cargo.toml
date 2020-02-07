@@ -31,5 +31,5 @@ default = ["zero-copy-on-write"]
 zero-copy-on-write = []
 
 [badges]
-travis-ci = { repository = "https://travis-ci.org/vvvy/webhdfs-rs" }
+travis-ci = { repository = "vvvy/webhdfs-rs", branch = "master" }
 maintenance = { status = "actively-developed" }
