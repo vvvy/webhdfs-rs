@@ -1,14 +1,11 @@
 //! Asynchronous WebHDFS client implementation
 
 use std::{future::Future, time::Duration};
-
 use http::{Uri, uri::Parts as UriParts, Method};
 use futures::Stream;
 use bytes::Bytes;
-
 use crate::uri_tools::*;
 use crate::natmap::{NatMap, NatMapPtr};
-
 use crate::error::*;
 use crate::rest_client::{HttpyClient, Data};
 use crate::datatypes::*;

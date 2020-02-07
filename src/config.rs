@@ -20,8 +20,6 @@ use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 use std::collections::HashMap;
 use http::Uri;
-
-
 use crate::error::*;
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 

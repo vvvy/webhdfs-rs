@@ -95,79 +95,7 @@ async fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Result<Re
             Err(app_error!(generic "Remote error w/o JSON content"))
         }
     }
-
-    /*
-    match content_type_extractor(&res) {
-        Ok(ct) => if res.status().is_success() { 
-            if match_mimes(&ct, ct_required) {
-                Ok(res)
-            } else {
-                Err(app_error!(generic "Invald content type: required='{:?}' found='{:?}'", ct_required, ct))
-            }
-        } else {
-            //TODO limit number of bytes read if ct not json (i.e. unknown)
-            let maybe_bytes: Result<Vec<Bytes>> = res.into_body().fold(
-                Ok(Vec::new()), 
-                |acc, bres| async move { match (acc, bres) { (Ok(mut v), Ok(el)) => { v.push(el); Ok(v) } } }
-            ).await;
-            //let n = res.into_body().next();
-
-
-            //impl Default for Result<Vec<Bytes>> {
-            //    fn default() -> Result<Vec<Bytes>> { Ok(Vec::new())  }
-            // }
-            //let maybe_bytes: Vec<Result<Bytes>> = res.into_body().collect().await;
-
-            match maybe_bytes {
-                Ok(bytes) => if match_mimes(&ct, RCT::JSON) {
-                    let ex = match serde_json::from_slice::<RemoteExceptionResponse>(&bytes) {
-                        Ok(rer) => rer.remote_exception.into(),
-                        Err(e) => app_error!(generic "JSON err deseriaization error, recovered text: '{}'", 
-                            String::from_utf8_lossy(bytes.as_ref()))
-                    };
-                    Err(ex)    
-                } else {
-                    Err(app_error!(
-                        generic "Remote error w/o JSON content, recovered text: '{}'", String::from_utf8_lossy(bytes.as_ref())
-                    ))
-                }
-            }
-
-            
-            /*
-            if match_mimes(&ct, RCT::JSON) {
-                Box::new(
-                    concat.and_then(move |body| 
-                        serde_json::from_slice::<RemoteExceptionResponse>(&body)
-                        .aerr_f(|| format!("JSON err deseriaization error, recovered text: '{}'", String::from_utf8_lossy(body.as_ref())))
-                        .map(|er| er.remote_exception)
-
-                    ).and_then(|ex| 
-                        futures::future::err(ex.into())
-                    )
-                )
-            } else {
-                Box::new(
-                    concat.and_then(move |body|  
-                        err(app_error!(
-                            generic "Remote error w/o JSON content, recovered text: '{}'", String::from_utf8_lossy(body.as_ref())
-                        ))
-                    )
-                )
-            }
-            */
-        }
-        Err(e) => Err(e)
-    }
-    */
 }
-
-//#[inline]
-//async fn ensure_ct(ct_required: RCT, f: impl Future<Output=Response<Body>> + Send) -> Result<Response<Body>> {
-//    let res = f.await;
-//    error_and_ct_filter(ct_required, res).await
-//    //f.and_then(move |res| error_and_ct_filter(ct_required, res))
-//}
 
 #[inline]
 async fn extract_json<R>(res: Response<Body>) -> Result<R>

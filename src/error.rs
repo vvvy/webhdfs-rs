@@ -10,7 +10,6 @@ pub enum Cause {
     None,
     Hyper(hyper::error::Error),
     HyperHeaderToStr(hyper::header::ToStrError),
-    //HyperTls(hyper_tls::Error),
     MimeFromStr(mime::FromStrError),
     SerdeJson(serde_json::Error),
     SerdeToml(toml::de::Error),
@@ -69,7 +68,6 @@ impl Display for Error {
         match &self.cause {
             Cause::Hyper(e) => write!(f, "; caused by hyper::error::Error: {}", e),
             Cause::HyperHeaderToStr(e) => write!(f, "; caused by hyper::header::ToStrError: {}", e),
-            //Cause::HyperTls(e) => write!(f, "; caused by hyper_tls::Error: {}", e),
             Cause::MimeFromStr(e) => write!(f, "; caused by mime::FromStrError: {}", e),
             Cause::SerdeJson(e) => write!(f, "; caused by serde_json::Error: {}", e),
             Cause::SerdeToml(e) => write!(f, "; caused by toml::de::Error: {}", e),
@@ -91,7 +89,6 @@ impl std::error::Error for Error {
         match &self.cause {
             Cause::Hyper(e) => Some(e),
             Cause::HyperHeaderToStr(e) => Some(e),
-            //Cause::HyperTls(e) => Some(e),
             Cause::MimeFromStr(e) => Some(e),
             Cause::SerdeJson(e) => Some(e),
             Cause::SerdeToml(e) => Some(e),
@@ -198,7 +195,6 @@ macro_rules! error_conversions_noarg {
 error_conversions!{
     Hyper(hyper::error::Error),
     HyperHeaderToStr(hyper::header::ToStrError),
-    //HyperTls(hyper_tls::Error),
     MimeFromStr(mime::FromStrError),
     SerdeJson(serde_json::Error),
     SerdeToml(toml::de::Error),
