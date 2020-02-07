@@ -1,9 +1,9 @@
 //! Asynchronous WebHDFS client implementation
 
-use std::time::Duration;
+use std::{future::Future, time::Duration};
 
 use http::{Uri, uri::Parts as UriParts, Method};
-use futures::{Future, Stream};
+use futures::Stream;
 use bytes::Bytes;
 
 use crate::uri_tools::*;
@@ -14,6 +14,7 @@ use crate::rest_client::{HttpyClient, Data};
 use crate::datatypes::*;
 use crate::op::*;
 use crate::config::*;
+use crate::future_tools;
 
 
 
@@ -102,8 +103,8 @@ impl HdfsClient {
     
     fn uri(&self, file_path: &str, op: Op, args: Vec<OpArg>) -> Result<Uri> {
         let mut b = Uri::builder();        
-        if let Some(scheme) = &self.entrypoint.scheme { b.scheme(scheme.clone()); }
-        if let Some(authority) = &self.entrypoint.authority { b.authority(authority.clone()); }
+        if let Some(scheme) = &self.entrypoint.scheme { b = b.scheme(scheme.clone()); }
+        if let Some(authority) = &self.entrypoint.authority { b = b.authority(authority.clone()); }
 
         let q = PathEncoder::new(Self::SVC_MOUNT_POINT).extend(file_path).query();
         let q = if let Some(user) = &self.user_name { q.add_pv("user.name", user) } else { q };
@@ -118,65 +119,58 @@ impl HdfsClient {
     }
 
     #[inline]
-    fn uri_result(&self, path: &str, op: Op, args: Vec<OpArg>) -> impl Future<Item=Uri, Error=Error> + Send {
-        futures::future::result(self.uri(path, op, args))
+    fn httpc(&self, path: &str, op: Op, args: Vec<OpArg>) -> Result<HttpyClient> {
+        let natmap = self.natmap();
+        let uri = self.uri(path, op, args)?;
+        Ok(HttpyClient::new(uri, natmap))
     }
 
     #[inline]
-    fn get_json<T: serde::de::DeserializeOwned + Send + 'static>(&self, path: &str, op: Op, args: Vec<OpArg>) 
-    -> impl Future<Item=T, Error=Error> + Send {
-        let natmap = self.natmap();
-        self.uri_result(path, op, args).and_then(|uri| HttpyClient::new(uri, natmap).get_json())
+    async fn get_json<T: serde::de::DeserializeOwned + Send + 'static>(&self, path: &str, op: Op, args: Vec<OpArg>) 
+    -> Result<T> {
+        self.httpc(path, op, args)?.get_json().await
     }
 
+    //NOTE Does not convert to async fn due to 'static inside Data, E0700 hidden type for impl Trait captures... 
+    //Presumably a bug in rustc
     #[inline]
     fn data_op(&self, method: Method, path: &str, op: Op, args: Vec<OpArg>, data: Data) 
-    -> impl Future<Item=(), Error=Error> + Send {
-        let natmap = self.natmap();
-        self.uri_result(path, op, args).and_then(|uri| HttpyClient::new(uri, natmap).post_binary(method, data))
+    -> impl Future<Output=Result<()>> {
+        future_tools::simplify_future_result(self.httpc(path, op, args).map(|h| h.post_binary(method, data)))
     }
 
     #[inline]
-    fn data_op_b(&self, method: Method, path: &str, op: Op, args: Vec<OpArg>) 
-    -> impl Future<Item=bool, Error=Error> + Send {
-        let natmap = self.natmap();
-        self
-            .uri_result(path, op, args)
-            .and_then(|uri| HttpyClient::new(uri, natmap).op_json(method))
-            .map(|b: Boolean| b.boolean)
+    async fn data_op_b(&self, method: Method, path: &str, op: Op, args: Vec<OpArg>) 
+    -> Result<bool> {
+        self.httpc(path, op, args)?.op_json(method).await.map(|b: Boolean| b.boolean)
     }
 
     #[inline]
-    fn data_op_e(&self, method: Method, path: &str, op: Op, args: Vec<OpArg>) 
-    -> impl Future<Item=(), Error=Error> + Send {
-        let natmap = self.natmap();
-        self
-            .uri_result(path, op, args)
-            .and_then(|uri| HttpyClient::new(uri, natmap).op_empty(method))
+    async fn data_op_e(&self, method: Method, path: &str, op: Op, args: Vec<OpArg>) 
+    -> Result<()> {
+        self.httpc(path, op, args)?.op_empty(method).await
     }
 
     pub(crate) fn default_timeout(&self) -> &Duration { &self.default_timeout }
 
     /// Get directory listing
-    pub fn dir(&self, path: &str) -> impl Future<Item=ListStatusResponse, Error=Error> + Send {
-        self.get_json(path, Op::LISTSTATUS, vec![])
+    pub async fn dir(&self, path: &str) -> Result<ListStatusResponse> {
+        self.get_json(path, Op::LISTSTATUS, vec![]).await
     }
 
     /// Get status
-    pub fn stat(&self, path: &str) -> impl Future<Item=FileStatusResponse, Error=Error> + Send {
-        self.get_json(path, Op::GETFILESTATUS, vec![])
+    pub async fn stat(&self, path: &str) -> Result<FileStatusResponse> {
+        self.get_json(path, Op::GETFILESTATUS, vec![]).await
     }
 
     /// Read file data
-    pub fn open(&self, path: &str, opts: OpenOptions) -> impl Stream<Item=Bytes, Error=Error> + Send {
-        let natmap = self.natmap();
-        self.uri_result(path, Op::OPEN, opts.into())
-            .map(|uri| HttpyClient::new(uri, natmap).get_binary())
-            .flatten_stream()
+    pub fn open(&self, path: &str, opts: OpenOptions) -> impl Stream<Item=Result<Bytes>> {
+        let binary_stream_result = self.httpc(path, Op::OPEN, opts.into()).map(|h| h.get_binary());
+        future_tools::simplify_stream_result(binary_stream_result)
     }
 
     /// Create a HDFS file and write some data
-    pub fn create(&self, path: &str, data: Data, opts: CreateOptions) -> impl Future<Item=(), Error=Error> + Send {
+    pub fn create(&self, path: &str, data: Data, opts: CreateOptions) -> impl Future<Output=Result<()>> {
         //curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CREATE
         //           [&overwrite=<true |false>][&blocksize=<LONG>][&replication=<SHORT>]
         //           [&permission=<OCTAL>][&buffersize=<INT>]"
@@ -184,42 +178,42 @@ impl HdfsClient {
     }
 
     /// Append to a HDFS file
-    pub fn append(&self, path: &str, data: Data, opts: AppendOptions) -> impl Future<Item=(), Error=Error> + Send {
+    pub fn append(&self, path: &str, data: Data, opts: AppendOptions) -> impl Future<Output=Result<()>> {
         //curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=APPEND[&buffersize=<INT>]"
         self.data_op(Method::POST, path, Op::APPEND, opts.into(), data)
     }
 
     /// Concatenate files
-    pub fn concat(&self, path: &str, paths: Vec<String>) -> impl Future<Item=(), Error=Error> + Send {
+    pub async fn concat(&self, path: &str, paths: Vec<String>) -> Result<()> {
         //curl -i -X POST "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CONCAT&sources=<PATHS>"
-        self.data_op_e(Method::POST, path, Op::CONCAT, vec![OpArg::Sources(paths)])
+        self.data_op_e(Method::POST, path, Op::CONCAT, vec![OpArg::Sources(paths)]).await
     }
 
     /// Make a directory
-    pub fn mkdirs(&self, path: &str, opts: MkdirsOptions) -> impl Future<Item=bool, Error=Error> + Send {
+    pub async fn mkdirs(&self, path: &str, opts: MkdirsOptions) -> Result<bool> {
         //curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=MKDIRS[&permission=<OCTAL>]"
-        self.data_op_b(Method::PUT, path, Op::MKDIRS, opts.into())
+        self.data_op_b(Method::PUT, path, Op::MKDIRS, opts.into()).await
     }
 
     /// Rename a file/directory
-    pub fn rename(&self, path: &str, destination: String) -> impl Future<Item=bool, Error=Error> + Send {
+    pub async fn rename(&self, path: &str, destination: String) -> Result<bool> {
         //curl -i -X PUT "<HOST>:<PORT>/webhdfs/v1/<PATH>?op=RENAME&destination=<PATH>"
-        self.data_op_b(Method::PUT, path, Op::RENAME, vec![OpArg::Destination(destination)])
+        self.data_op_b(Method::PUT, path, Op::RENAME, vec![OpArg::Destination(destination)]).await
     }
 
     /// Create a Symbolic Link
-    pub fn create_symlink(&self, path: &str, destination: String, opts: CreateSymlinkOptions) -> impl Future<Item=(), Error=Error> + Send {
+    pub async fn create_symlink(&self, path: &str, destination: String, opts: CreateSymlinkOptions) -> Result<()> {
         //curl -i -X PUT "http://<HOST>:<PORT>/webhdfs/v1/<PATH>?op=CREATESYMLINK
         //                      &destination=<PATH>[&createParent=<true|false>]"
         let mut o = vec![OpArg::Destination(destination)];
         o.append(&mut opts.into());
-        self.data_op_e(Method::PUT, path, Op::CREATESYMLINK, o)
+        self.data_op_e(Method::PUT, path, Op::CREATESYMLINK, o).await
     }
 
     /// Delete a File/Directory
-    pub fn delete(&self, path: &str, opts: DeleteOptions) -> impl Future<Item=bool, Error=Error> + Send {
+    pub async fn delete(&self, path: &str, opts: DeleteOptions) -> Result<bool> {
         //curl -i -X DELETE "http://<host>:<port>/webhdfs/v1/<path>?op=DELETE
         //                      [&recursive=<true|false>]"
-        self.data_op_b(Method::DELETE, path, Op::DELETE, opts.into())
+        self.data_op_b(Method::DELETE, path, Op::DELETE, opts.into()).await
     }
 }

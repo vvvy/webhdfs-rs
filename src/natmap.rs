@@ -20,7 +20,7 @@ impl NatMap {
         if self.natmap.is_empty() {
             Ok(uri)
         } else {
-            if let Some(s) = uri.authority_part() {
+            if let Some(s) = uri.authority() {
                 if let Some(replacement) = self.natmap.get(s.as_str()) {
                     let mut parts = uri.into_parts();
                     parts.authority = Some(replacement.clone());

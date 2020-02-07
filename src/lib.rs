@@ -22,6 +22,7 @@ mod error;
 mod rest_client;
 mod natmap;
 mod uri_tools;
+mod future_tools;
 mod op;
 pub mod config;
 pub mod datatypes;

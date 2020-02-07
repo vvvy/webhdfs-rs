@@ -9,8 +9,8 @@ use std::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 use http::Uri;
-use tokio::runtime::current_thread::Runtime;
-use futures::{Future, Stream};
+use tokio::runtime::{Builder, Runtime};
+use futures::{Future, Stream, stream::StreamExt};
 use bytes::Bytes;
 use crate::error::*;
 use crate::datatypes::*;
@@ -18,6 +18,9 @@ use crate::async_client::*;
 use crate::natmap::NatMap;
 
 pub use crate::op::*;
+
+#[inline]
+fn single_threaded_runtime() -> Result<Runtime> { Ok(Builder::new().basic_scheduler().enable_io().enable_time().build()?) }
 
 /// HDFS Connection data, etc.
 #[derive(Clone)]
@@ -58,7 +61,7 @@ impl SyncHdfsClientBuilder {
     pub fn build(self) -> Result<SyncHdfsClient> {
          Ok(SyncHdfsClient { 
             acx: Rc::new(self.a.build()), 
-            rt: Rc::new(RefCell::new(Runtime::new()?))
+            rt: Rc::new(RefCell::new(single_threaded_runtime()?))
         })
     }
 }
@@ -67,24 +70,28 @@ impl SyncHdfsClient {
     pub fn from_async(acx: HdfsClient)-> Result<Self> {
         Ok(Self { 
             acx: Rc::new(acx), 
-            rt: Rc::new(RefCell::new(Runtime::new()?))
+            rt: Rc::new(RefCell::new(single_threaded_runtime()?))
         })
     }
     
     #[inline]
-    fn exec<R>(&self, f: impl Future<Item=R, Error=Error>) -> Result<R> {
-        fn with_timeout<R>(f: impl Future<Item=R, Error=Error>, timeout: Duration) -> impl Future<Item=R, Error=Error> {
-            use tokio::prelude::FutureExt;
-            f.timeout(timeout).map_err(|e| match e.into_inner() {
-                Some(e) => e,
-                None => Error::timeout_c("HTTP operation timed out")
-            })
+    fn exec<R>(&self, f: impl Future<Output=Result<R>>) -> Result<R> {
+        async fn with_timeout<R>(f: impl Future<Output=Result<R>>, timeout: Duration) -> Result<R> {
+            Ok(tokio::time::timeout(timeout, f).await??)
         }
-
+        self.rt.borrow_mut().block_on(with_timeout(f, self.acx.default_timeout().clone()))
+    }
+    
+    #[inline]
+    fn exec0<R>(&self, f: impl Future<Output=R>) -> Result<R> {
+        async fn with_timeout<R>(f: impl Future<Output=R>, timeout: Duration) -> Result<R> {
+            Ok(tokio::time::timeout(timeout, f).await?)
+        }
         self.rt.borrow_mut().block_on(with_timeout(f, self.acx.default_timeout().clone()))
     }
 
-    fn save_stream<W: Write>(&self, mut input: impl Stream<Item=Bytes, Error=Error>, output: &mut W) -> Result<()> {
+
+    fn save_stream<W: Write>(&self, input: impl Stream<Item=Result<Bytes>>, output: &mut W) -> Result<()> {
         fn write_bytes<W: Write>(b: &Bytes, w: &mut W) -> Result<()> {
             if w.write(&b)? != b.len() {
                 Err(app_error!(generic "Short write"))
@@ -92,16 +99,17 @@ impl SyncHdfsClient {
                 Ok(())
             }
         }
-
+        let mut input = Box::pin(input);
         loop {
-            let f = input.into_future().map_err(|(e, _)| e);
-            let (ob, input2) = self.exec(f)?;
+            let f = input.into_future();
+            let (ob, input2) = self.exec0(f)?;
             match ob {
-                Some(bytes) => write_bytes(&bytes, output)?,
+                Some(Ok(bytes)) => write_bytes(&bytes, output)?,
+                Some(Err(e)) => break Err(e),
                 None => break Ok(())
             }
             input = input2;
-        }        
+        }
     }
 
     /// Get a file (read it from hdfs and save to local fs)
@@ -179,22 +187,24 @@ impl Read for ReadHdfsFile {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
 
         let buf_len: i64 = buf.len().try_into().map_err(|_| IoError::new(IoErrorKind::InvalidInput, "buffer too big"))?;
-        let mut s = self.cx.acx.open(&self.path, OpenOptions::new().offset(self.pos).length(buf_len));
+        let s = self.cx.acx.open(&self.path, OpenOptions::new().offset(self.pos).length(buf_len));
         let mut pos: usize = 0;
         
+        let mut s = Box::pin(s);
         loop {
-            match self.cx.exec(s.into_future().map_err(|(e, _s)| e)) {
-                Ok((Some(chunk), s1)) => {
+            let f = s.into_future();
+            match self.cx.exec0(f)? {
+                (Some(Ok(chunk)), s1) => {
                     s = s1;
                     self.pos += chunk.len() as i64;
                     let bcount = (&mut buf[pos..]).write(&chunk)?;
                     pos += bcount;
                 }
-                Ok((None, _)) => {
-                    break Ok(pos)
+                (Some(Err(e)), _) => {
+                    break Err(e.into())
                 }
-                Err(err) => {
-                    break Err(err.into())
+                (None, _) => {
+                    break Ok(pos)
                 }
             }
         }

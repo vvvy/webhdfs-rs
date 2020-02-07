@@ -10,7 +10,7 @@ pub enum Cause {
     None,
     Hyper(hyper::error::Error),
     HyperHeaderToStr(hyper::header::ToStrError),
-    HyperTls(hyper_tls::Error),
+    //HyperTls(hyper_tls::Error),
     MimeFromStr(mime::FromStrError),
     SerdeJson(serde_json::Error),
     SerdeToml(toml::de::Error),
@@ -69,7 +69,7 @@ impl Display for Error {
         match &self.cause {
             Cause::Hyper(e) => write!(f, "; caused by hyper::error::Error: {}", e),
             Cause::HyperHeaderToStr(e) => write!(f, "; caused by hyper::header::ToStrError: {}", e),
-            Cause::HyperTls(e) => write!(f, "; caused by hyper_tls::Error: {}", e),
+            //Cause::HyperTls(e) => write!(f, "; caused by hyper_tls::Error: {}", e),
             Cause::MimeFromStr(e) => write!(f, "; caused by mime::FromStrError: {}", e),
             Cause::SerdeJson(e) => write!(f, "; caused by serde_json::Error: {}", e),
             Cause::SerdeToml(e) => write!(f, "; caused by toml::de::Error: {}", e),
@@ -91,7 +91,7 @@ impl std::error::Error for Error {
         match &self.cause {
             Cause::Hyper(e) => Some(e),
             Cause::HyperHeaderToStr(e) => Some(e),
-            Cause::HyperTls(e) => Some(e),
+            //Cause::HyperTls(e) => Some(e),
             Cause::MimeFromStr(e) => Some(e),
             Cause::SerdeJson(e) => Some(e),
             Cause::SerdeToml(e) => Some(e),
@@ -168,14 +168,37 @@ macro_rules! error_conversion {
     };
 }
 
+macro_rules! error_conversion_noarg {
+    ($f:ident($t:ty)) => {
+        impl From<$t> for Error {
+            #[cfg(panic_on_error)]
+            fn from(_: $t) -> Self {  panic!(Error::anon(Cause::$f).to_string()) }
+            #[cfg(not(panic_on_error))]
+            fn from(_: $t) -> Self {  Error::anon(Cause::$f) }
+        }
+
+        impl IntoErrorAnnotated for $t {
+            fn into_with(self, msg: Cow<'static, str>) -> Error {
+                Error::new(Some(msg), Cause::$f)
+            }
+        }
+    };
+}
+
 macro_rules! error_conversions {
     ($($f:ident($t:ty)),+) => { $(error_conversion!{$f($t)})+ } 
 }
 
+
+macro_rules! error_conversions_noarg {
+    ($($f:ident($t:ty)),+) => { $(error_conversion_noarg!{$f($t)})+ } 
+}
+
+
 error_conversions!{
     Hyper(hyper::error::Error),
     HyperHeaderToStr(hyper::header::ToStrError),
-    HyperTls(hyper_tls::Error),
+    //HyperTls(hyper_tls::Error),
     MimeFromStr(mime::FromStrError),
     SerdeJson(serde_json::Error),
     SerdeToml(toml::de::Error),
@@ -185,6 +208,10 @@ error_conversions!{
     Io(std::io::Error),
     //IntConversion(std::num::TryFromIntError),
     RemoteException(crate::datatypes::RemoteException)
+}
+
+error_conversions_noarg!{
+    Timeout(tokio::time::Elapsed)
 }
 
 impl From<Error> for std::io::Error {

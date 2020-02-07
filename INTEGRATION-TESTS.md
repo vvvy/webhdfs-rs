@@ -111,8 +111,8 @@ item. Finally, checksums for newly written chunks are validated against pre-calc
 
 2. 'IOException: Failed to replace a bad datanode on the existing pipeline due to no more good datanodes being available to try' errors during write test: Add the following to `/etc/hadoop/conf/hdfs-site.xml` and restart the datanode services(s):
 
- ```xml
- <property>
+```xml
+<property>
   <name>dfs.client.block.write.replace-datanode-on-failure.policy</name>
   <value>NEVER</value>
 </property>

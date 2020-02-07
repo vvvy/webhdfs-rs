@@ -1,17 +1,19 @@
-use futures::{Future, Stream};
-
-use http::{uri::Scheme, request::Builder as RequestBuilder, method::Method};
+use std::future::Future;
+use futures::{Stream, FutureExt, StreamExt};
 use hyper::{
     Request, Response, Body, Uri,
-    client::{Client, ResponseFuture, HttpConnector}
+    client::{Client, ResponseFuture, HttpConnector},
+    body::aggregate
 };
-use bytes::Bytes;
 use hyper_tls::HttpsConnector;
+use http::{uri::Scheme, request::Builder as RequestBuilder, method::Method};
+use bytes::{Bytes, Buf};
 use mime::Mime;
 use log::trace;
 use crate::error::*;
 use crate::datatypes::RemoteExceptionResponse;
 use crate::natmap::NatMapPtr;
+use crate::future_tools;
 
 
 #[inline]
@@ -40,8 +42,7 @@ enum RCT {
 }
 
 #[inline]
-fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
-    use futures::future::{ok, err};
+async fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Result<Response<Body>> {
 
     #[inline]
     fn content_type_extractor(res: &Response<Body>) -> Result<Option<Mime>> {
@@ -71,15 +72,69 @@ fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Box<dyn Future<
         }
     }
 
+    let ct = content_type_extractor(&res)?;
+    if res.status().is_success() {
+        if match_mimes(&ct, ct_required) {
+            Ok(res)
+        } else {
+            Err(app_error!(generic "Invald content type: required='{:?}' found='{:?}'", ct_required, ct))
+        }
+    } else {
+        //Failure: try to retrieve JSON error message
+        if match_mimes(&ct, RCT::JSON) {
+            match aggregate(res.into_body()).await {
+                Ok(buf) => match serde_json::from_slice::<RemoteExceptionResponse>(buf.bytes()) {
+                    Ok(rer) => Err(rer.remote_exception.into()),
+                    Err(e) => Err(app_error!(generic "JSON-error deseriaization error: {}, recovered text: '{}'", 
+                        e, String::from_utf8_lossy(buf.bytes().as_ref())
+                    ))
+                }
+                Err(e) => Err(app_error!(generic "JSON-error aggregation error: {}", e))
+            }
+        } else {
+            Err(app_error!(generic "Remote error w/o JSON content"))
+        }
+    }
+
+    /*
     match content_type_extractor(&res) {
         Ok(ct) => if res.status().is_success() { 
             if match_mimes(&ct, ct_required) {
-                Box::new(ok(res))
+                Ok(res)
             } else {
-                Box::new(err(app_error!(generic "Invald content type: required='{:?}' found='{:?}'", ct_required, ct)))
+                Err(app_error!(generic "Invald content type: required='{:?}' found='{:?}'", ct_required, ct))
             }
         } else {
-            let concat = res.into_body().concat2().from_err();
+            //TODO limit number of bytes read if ct not json (i.e. unknown)
+            let maybe_bytes: Result<Vec<Bytes>> = res.into_body().fold(
+                Ok(Vec::new()), 
+                |acc, bres| async move { match (acc, bres) { (Ok(mut v), Ok(el)) => { v.push(el); Ok(v) } } }
+            ).await;
+            //let n = res.into_body().next();
+
+
+            //impl Default for Result<Vec<Bytes>> {
+            //    fn default() -> Result<Vec<Bytes>> { Ok(Vec::new())  }
+            // }
+            //let maybe_bytes: Vec<Result<Bytes>> = res.into_body().collect().await;
+
+            match maybe_bytes {
+                Ok(bytes) => if match_mimes(&ct, RCT::JSON) {
+                    let ex = match serde_json::from_slice::<RemoteExceptionResponse>(&bytes) {
+                        Ok(rer) => rer.remote_exception.into(),
+                        Err(e) => app_error!(generic "JSON err deseriaization error, recovered text: '{}'", 
+                            String::from_utf8_lossy(bytes.as_ref()))
+                    };
+                    Err(ex)    
+                } else {
+                    Err(app_error!(
+                        generic "Remote error w/o JSON content, recovered text: '{}'", String::from_utf8_lossy(bytes.as_ref())
+                    ))
+                }
+            }
+
+            
+            /*
             if match_mimes(&ct, RCT::JSON) {
                 Box::new(
                     concat.and_then(move |body| 
@@ -100,50 +155,57 @@ fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Box<dyn Future<
                     )
                 )
             }
+            */
         }
-        Err(e) => Box::new(err(e))
+        Err(e) => Err(e)
+    }
+    */
+}
+
+//#[inline]
+//async fn ensure_ct(ct_required: RCT, f: impl Future<Output=Response<Body>> + Send) -> Result<Response<Body>> {
+//    let res = f.await;
+//    error_and_ct_filter(ct_required, res).await
+//    //f.and_then(move |res| error_and_ct_filter(ct_required, res))
+//}
+
+#[inline]
+async fn extract_json<R>(res: Response<Body>) -> Result<R>
+where R: serde::de::DeserializeOwned + Send { 
+    trace!("HTTP JSON Response {} ct={:?} cl={:?}", 
+        res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH)
+    );
+    let buf = aggregate(res.into_body()).await?;
+    serde_json::from_slice(buf.bytes()).aerr("JSON deseriaization error")
+}
+
+#[inline]
+async fn extract_binary(res: Response<Body>) -> impl Stream<Item=Result<Bytes>> {
+    trace!("HTTP Binary Response {} ct={:?} cl={:?}", 
+        res.status(), 
+        res.headers().get(hyper::header::CONTENT_TYPE), 
+        res.headers().get(hyper::header::CONTENT_LENGTH)
+    );
+    res.into_body().map(|r| r.aerr("Binary sream read error"))
+}
+
+#[inline]
+async fn extract_empty(res: Response<Body>) -> Result<()> {
+    trace!("HTTP Empty Response {} ct={:?} cl={:?}", 
+        res.status(), 
+        res.headers().get(hyper::header::CONTENT_TYPE), 
+        res.headers().get(hyper::header::CONTENT_LENGTH)
+    );
+    let buf = aggregate(res.into_body()).await?;
+    if buf.bytes().is_empty() {
+        Ok(())
+    } else {
+        Err(app_error!(generic "Unexpected non-empty response received, where empty is expected"))
     }
 }
 
 #[inline]
-fn ensure_ct(ct_required: RCT, f: impl Future<Item=Response<Body>, Error=Error> + Send) 
--> impl Future<Item=Response<Body>, Error=Error> + Send {
-    f.and_then(move |res| error_and_ct_filter(ct_required, res))
-}
-
-#[inline]
-fn extract_json<R>(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Future<Item=R, Error=Error> + Send
-where R: serde::de::DeserializeOwned + Send {
-    f.and_then(|res| {
-        trace!("HTTP JSON Response {} ct={:?} cl={:?}", res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH));
-        res.into_body().concat2().from_err().and_then(|body| serde_json::from_slice(&body).aerr("JSON deseriaization error"))
-    })
-}
-
-#[inline]
-fn extract_binary(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Stream<Item=Bytes, Error=Error> + Send {
-    f.map(|res| {
-        trace!("HTTP Binary Response {} ct={:?} cl={:?}", res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH));
-        res.into_body().from_err()
-    }).flatten_stream().map(|c| c.into_bytes())
-}
-
-#[inline]
-fn extract_empty(f: impl Future<Item=Response<Body>, Error=Error> + Send) -> impl Future<Item=(), Error=Error> + Send {
-    f.and_then(|res| {
-        trace!("HTTP Empty Response {} ct={:?} cl={:?}", res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH));
-        res.into_body().concat2().from_err().and_then(|body| 
-            if body.is_empty() {
-                futures::future::ok(())
-            } else {
-                futures::future::err(app_error!(generic "Unexpected non-empty response received, where empty is expected"))
-            }
-        )
-    })
-}
-
-#[inline]
-fn http_empty_body(mut request: RequestBuilder) -> Result<Request<Body>> {
+fn http_empty_body(request: RequestBuilder) -> Result<Request<Body>> {
     Ok(request.body(Body::empty())?)
 }
 
@@ -163,7 +225,7 @@ pub fn data_empty() -> Data { std::borrow::Cow::Borrowed(&[]) }
 
 
 #[inline]
-fn http_binary_body(mut request: RequestBuilder, payload: Data) -> Result<Request<Body>> {
+fn http_binary_body(request: RequestBuilder, payload: Data) -> Result<Request<Body>> {
     Ok(request.body(Body::from(payload))?)
 }
 
@@ -173,14 +235,12 @@ enum Httpx {
 }
 
 impl Httpx {
-    fn new(uri: &Uri) -> Result<Httpx> {
-        if Some(&Scheme::HTTPS) == uri.scheme_part() {
-            Ok(HttpsConnector::new(1)
-                .map(|connector|
-                    Httpx::Https(Client::builder().build::<_, hyper::Body>(connector))
-                )?)
+    fn new(uri: &Uri) -> Httpx {
+        if Some(&Scheme::HTTPS) == uri.scheme() {
+            let connector = HttpsConnector::new();
+            Httpx::Https(Client::builder().build::<_, hyper::Body>(connector))
         } else {
-            Ok(Httpx::Http(Client::new()))
+            Httpx::Http(Client::new())
         }
     }
 
@@ -193,52 +253,47 @@ impl Httpx {
 }
 
 struct HttpxClient {
-    endpoint: Httpx,
+    endpoint: Httpx
 }
 
 impl HttpxClient
 {
-    fn new(uri: &Uri) -> Result<HttpxClient> {
-        Httpx::new(uri).map(|p| HttpxClient { endpoint: p })
-    }
+    fn new(uri: &Uri) -> Self { Self { endpoint: Httpx::new(uri) } }
 
     #[inline]
     fn create_request(&self, method: Method, uri: Uri) -> RequestBuilder {
         trace!("{} {}", method, uri);
-        let mut r = RequestBuilder::new();
-        r.method(method).uri(uri);
-        r
+        RequestBuilder::new()
+            .method(method)
+            .uri(uri)
     }
 
     #[inline]
-    fn get_like_future(&self, uri: Uri, method: Method) -> impl Future<Item=Response<Body>, Error=Error> + Send {
-        let r = self.create_request(method, uri);
-        let f = http_empty_body(r).map(|r| self.endpoint.request_raw(r).from_err());
-        futures::future::result(f).flatten()
+    async fn get_like_future(&self, uri: Uri, method: Method) -> Result<Response<Body>> {
+        let builder = self.create_request(method, uri);
+        let body = http_empty_body(builder)?;
+        let request = self.endpoint.request_raw(body);
+        let response = request.await?;
+        Ok(response)
     }
 
     #[inline]
-    fn post_like_future(&self, uri: Uri, method: Method, payload: Data) -> impl Future<Item=Response<Body>, Error=Error> + Send {
-        let r = self.create_request(method, uri);
-        let f = http_binary_body(r, payload).map(|r| self.endpoint.request_raw(r).from_err());
-        futures::future::result(f).flatten()
+    async fn post_like_future(&self, uri: Uri, method: Method, payload: Data) -> Result<Response<Body>> {
+        let builder = self.create_request(method, uri);
+        let body = http_binary_body(builder, payload)?;
+        let request = self.endpoint.request_raw(body);
+        let response = request.await?;
+        Ok(response)
     }
 
-    fn new_get_like(uri: Uri, method: Method) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
-        match Self::new(&uri) {
-            Ok(c) => Box::new(c.get_like_future(uri, method)),
-            Err(e) => Box::new(futures::future::err(e))
-        }
+    async fn new_get_like(uri: Uri, method: Method) -> Result<Response<Body>> {
+        Self::new(&uri).get_like_future(uri, method).await
     }
 
-    fn new_post_like(uri: Uri, method: Method, payload: Data) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
-        match Self::new(&uri) {
-            Ok(c) => Box::new(c.post_like_future(uri, method, payload)),
-            Err(e) => Box::new(futures::future::err(e))
-        }
+    async fn new_post_like(uri: Uri, method: Method, payload: Data) -> Result<Response<Body>> {
+        Self::new(&uri).post_like_future(uri, method, payload).await
     }
 }
-
 
 pub struct HttpyClient {
     uri: Uri, 
@@ -249,87 +304,91 @@ impl HttpyClient {
     pub fn new(uri: Uri, natmap: NatMapPtr) -> Self { Self { uri, natmap } }
 
     #[inline]
-    fn request_with_redirect(
+    async fn request_with_redirect<X, Y>(
         self, 
-        rf0: impl FnOnce(Uri) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> + Send,
-        rf1: impl FnOnce(Uri) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> + Send
-        ) -> impl Future<Item=Response<Body>, Error=Error> + Send {
+        rf0: impl FnOnce(Uri) -> X,
+        rf1: impl FnOnce(Uri) -> Y
+        ) -> Result<Response<Body>> 
+        where X: Future<Output=Result<Response<Body>>>, Y: Future<Output=Result<Response<Body>>> {
 
-        fn handle_redirect(
+        async fn handle_redirect<X>(
             r: Result<Response<Body>>, 
             natmap: NatMapPtr,
-            rf1: impl FnOnce(Uri) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send>
-            ) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
-            use futures::future::{ok, err};
+            rf1: impl FnOnce(Uri) -> X
+            ) -> Result<Response<Body>> 
+            where X: Future<Output=Result<Response<Body>>> {
             match r {
-                Ok(r) => Box::new(ok(r)),
+                Ok(r) => Ok(r),
                 Err(e) => match e.to_http_redirect() {
                     Ok((_code, location)) => match location.parse() {
                         Ok(uri) => match natmap.translate(uri) { 
-                            Ok(uri) => rf1(uri),
-                            Err(e) => Box::new(err(e))
+                            Ok(uri) => rf1(uri).await,
+                            Err(e) => Err(e)
                         }
-                        Err(e) => Box::new(err(app_error!((cause=e) "Cannot parse location URI returned by redirect")))
+                        Err(e) => Err(app_error!((cause=e) "Cannot parse location URI returned by redirect"))
                     }
-                    Err(e) => Box::new(err(e))
+                    Err(e) => Err(e)
                 }
             }
         }
         let Self { uri, natmap } = self;
-        rf0(uri)
-            .and_then(|r| redirect_filter(r))
-            .then(|r| handle_redirect(r, natmap, rf1))
+        let r0 = rf0(uri).await?;
+        let r1 = redirect_filter(r0);
+        handle_redirect(r1, natmap, rf1).await
     }
     
-    pub fn get_json<R>(self) -> impl Future<Item=R, Error=Error> + Send
+    pub async fn get_json<R>(self) -> Result<R>
         where R: serde::de::DeserializeOwned + Send + 'static {
         
-        let f0 = self.request_with_redirect( 
+        let result = self.request_with_redirect( 
             |uri| HttpxClient::new_get_like(uri, Method::GET), 
             |uri| HttpxClient::new_get_like(uri, Method::GET)
-        );
-        let f1 = ensure_ct(RCT::JSON, f0);
-        let f2 = extract_json(f1);
-        f2
+        ).await?;
+        let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
+        extract_json(result_filtered).await
     }
 
-    pub fn get_binary(self) -> impl Stream<Item=Bytes, Error=Error> + Send {
-        let f0 = self.request_with_redirect( 
-            |uri| HttpxClient::new_get_like(uri, Method::GET), 
-            |uri| HttpxClient::new_get_like(uri, Method::GET)
-        );
-        let f1 = ensure_ct(RCT::Binary, f0);
-        let f2 = extract_binary(f1);
-        f2
+    pub fn get_binary(self) -> impl Stream<Item=Result<Bytes>> {
+        #[inline]
+        async fn binary_response(c: HttpyClient) -> Result<Response<Body>> {
+            let result = c.request_with_redirect( 
+                |uri| HttpxClient::new_get_like(uri, Method::GET), 
+                |uri| HttpxClient::new_get_like(uri, Method::GET)
+            ).await?;
+            error_and_ct_filter(RCT::Binary, result).await
+        }
+
+        //Type: Future<Result<Future<Stream<Result>>>>
+        let binary_stream_result = binary_response(self).map(|result| result.map(|resp| extract_binary(resp).flatten_stream()));
+
+        future_tools::simplify_future_stream_result(binary_stream_result)      
     }
 
-    pub fn post_binary(self, method: Method, data: Data) -> impl Future<Item=(), Error=Error> + Send {
+    pub async fn post_binary(self, method: Method, data: Data) -> Result<()> {
         let method1 = method.clone();
-        let f0 = self.request_with_redirect(
+        let result = self.request_with_redirect(
             |uri| HttpxClient::new_get_like(uri, method1), 
             move |uri| HttpxClient::new_post_like(uri, method, data)
-        );
-        let f1 = ensure_ct(RCT::None, f0);
-        let f2 = extract_empty(f1);
-        f2
+        ).await?;
+        let result_filtered = error_and_ct_filter(RCT::None, result).await?;
+        extract_empty(result_filtered).await
     }
 
     /// No input, JSON output
-    pub fn op_json<R>(self, method: Method) -> impl Future<Item=R, Error=Error> + Send 
+    pub async fn op_json<R>(self, method: Method) -> Result<R> 
      where R: serde::de::DeserializeOwned + Send + 'static{
         let method1 = method.clone(); 
-        let f0 = self.request_with_redirect(
+        let result = self.request_with_redirect(
             |uri| HttpxClient::new_get_like(uri, method1), 
             move |uri| HttpxClient::new_post_like(uri, method, data_empty())
-        );
-        let f1 = ensure_ct(RCT::JSON, f0);
-        let f2 = extract_json(f1);
-        f2
+        ).await?;
+        let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
+        extract_json(result_filtered).await
     }
 
     /// No input, no output
-    pub fn op_empty(self, method: Method) -> impl Future<Item=(), Error=Error> + Send {
-        self.post_binary(method, data_empty())
+    pub async fn op_empty(self, method: Method) -> Result<()> {
+        self.post_binary(method, data_empty()).await
     }
     
 }
