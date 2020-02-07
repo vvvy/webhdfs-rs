@@ -79,9 +79,9 @@ Sample diff:
 
 ### Read test
 The read test consists of a sequence of reads and seeks against a testfile, set up by `READSCRIPT` setting.
-The social networking graph data file `soc-pokec-relationships.txt`, available on SNAP, is used as a testflle (any file, large enough, 
+The social networking graph data file `soc-pokec-relationships.txt`, available from SNAP, is used as a testflle (any file, large enough, 
 may be used; recommended size is 200-400M).
-During preparation, SHA-512 checksums are pre-calculated for each of `r:` chunks set up by `READSCRIPT` (chunks are extracted by dd utility).
+During preparation, SHA-512 checksums are pre-calculated for each of `r:` chunks set up by `READSCRIPT` (chunks are extracted by `dd`).
 The program under test is expected to execute the `READSCRIPT` below (actually, `READSCRIPTOUT`) by doing seeks and reads as requested.
 Upon each read, the program reads from the testfile (HDFS) then writes the content read to a file specified by 3rd part of `READSCRIPTOUT` 
 item. Finally, checksums for newly written chunks are validated against pre-calculated checksums.
@@ -107,7 +107,7 @@ item. Finally, checksums for newly written chunks are validated against pre-calc
 
 ## Possible problems and workarounds
 
-1. Note that both Bigtop provisioner variants seemingly do not support VM/container reboot. If a cluster's VM is powered down or a container terminated, the cluster shall be entirely deleted and re-created from scratch. However, a VM could be suspended.
+1. Note that both Bigtop provisioner variants seemingly do not support VM/container reboot. If a cluster's VM is powered down or a container terminated, the cluster shall be entirely deleted and re-created from scratch (yet a Vagrant VM can be suspended).
 
 2. 'IOException: Failed to replace a bad datanode on the existing pipeline due to no more good datanodes being available to try' errors during write test: Add the following to `/etc/hadoop/conf/hdfs-site.xml` and restart the datanode services(s):
 

@@ -15,3 +15,8 @@ Initial release. Only reads from HDFS.
 * `MKDIRS` added to IT
 * NAT mapings can be specified in `webhdfs.toml`
 * Misc doc fixes and enhancements
+
+### Version 0.2.2
+
+* Migration to async await
+* Bump versions of `hyper`, `hyper-tls`, `tokio`, `futures`, `http`, `bytes`
