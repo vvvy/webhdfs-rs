@@ -115,12 +115,12 @@ b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'-', b'_', b'.', b'
 
     let mut bm = [0u64; 4];
 
-    for v in unreserved_chars.into_iter() {
+    for v in unreserved_chars.iter() {
         let (a, b) = (v / 64, v % 64);
         bm[a as usize] |= 1 << b;
     }
 
-    println!("{:?}", bm.into_iter().map(|w| format!("{:X}", w)).collect::<Vec<String>>())
+    println!("{:?}", bm.iter().map(|w| format!("{:X}", w)).collect::<Vec<String>>())
 
     //["3FF600000000000", "47FFFFFE87FFFFFE", "0", "0"]
 }
