@@ -53,6 +53,7 @@ impl Serialize for UriW {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     pub entrypoint: UriW,
+    pub alt_entrypoint: Option<UriW>,
     pub default_timeout: Option<Duration>,
     pub user_name: Option<String>,
     pub doas: Option<String>,
@@ -63,7 +64,8 @@ pub struct Config {
 impl Config {
     pub fn new(uri: Uri) -> Self {
         Self { 
-            entrypoint: UriW::new(uri), 
+            entrypoint: UriW::new(uri),
+            alt_entrypoint: None,
             default_timeout: None,
             user_name: None,
             doas: None,

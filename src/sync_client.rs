@@ -84,15 +84,6 @@ impl SyncHdfsClient {
         }
         self.rt.borrow_mut().block_on(with_timeout(f, self.fostate, self.acx.default_timeout().clone()))
     }
-
-    /*#[inline]
-    fn exec___<R, E>(&mut self, f: impl Future<Output=FOStdResult<R, E>>) -> StdResult<R, E> where E: From<tokio::time::Elapsed>{
-        async fn with_timeout<R, E>(f: impl Future<Output=FOStdResult<R, E>>, fostate: FOState, timeout: Duration) -> FOStdResult<R, E> where E: From<tokio::time::Elapsed> {
-            Ok(tokio::time::timeout(timeout, f).await.map_err(|e| (e.into(), fostate))??)
-        }
-        let r = self.rt.borrow_mut().block_on(with_timeout(f, self.fostate, self.acx.default_timeout().clone()));
-        self.process_foresult(r)
-    }*/
     
     #[inline]
     fn exec0<R>(&self, f: impl Future<Output=R>) -> Result<R> {
@@ -103,8 +94,8 @@ impl SyncHdfsClient {
     }
 
     #[inline]
-    fn process_foresult<T, E>(&mut self, r: FOStdResult<T, E>) -> StdResult<T, E> {
-        let (r, fostate) = commute_foresult(r);
+    fn foresult<T, E>(&mut self, r: FOStdResult<T, E>) -> StdResult<T, E> {
+        let (r, fostate) = FOR::split(r);
         self.fostate = fostate;
         r
     }
@@ -113,21 +104,21 @@ impl SyncHdfsClient {
     pub fn open(&mut self, path: &str, open_options: OpenOptions) -> Result<Box<dyn Stream<Item=Result<Bytes>>+Unpin>> {
         let fs = self.acx.open(self.fostate, path, open_options);
         let r = self.exec0(fs)?;
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Append to a file
     pub fn append(&mut self, path: &str, data: Data, append_options: AppendOptions) -> DResult<()> {
         let f = self.acx.append(self.fostate, path, data, append_options);
         let r = self.exec(f);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Create file
     pub fn create(&mut self, path: &str, data: Data, opts: CreateOptions) -> DResult<()> {
         let f = self.acx.create(self.fostate, path, data, opts);
         let r = self.exec(f);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     fn save_stream<W: Write>(&self, input: impl Stream<Item=Result<Bytes>>, output: &mut W) -> Result<()> {
@@ -162,49 +153,49 @@ impl SyncHdfsClient {
     pub fn dir(&mut self, path: &str) -> Result<ListStatusResponse> {
         let r = self.acx.dir(self.fostate, path);
         let r = self.exec(r);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Stat a file /dir
     pub fn stat(&mut self, path: &str) -> Result<FileStatusResponse> {
         let r = self.acx.stat(self.fostate, path);
         let r = self.exec(r);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Concat File(s)
     pub fn concat(&mut self, path: &str, paths: Vec<String>) -> Result<()> {
         let r = self.acx.concat(self.fostate, path, paths);
         let r = self.exec(r);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Make a Directory
     pub fn mkdirs(&mut self, path: &str, opts: MkdirsOptions) -> Result<bool> {
         let r = self.acx.mkdirs(self.fostate, path, opts);
         let r = self.exec(r);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Rename a file/directory
     pub fn rename(&mut self, path: &str, destination: String) -> Result<bool> {
         let r = self.acx.rename(self.fostate, path, destination);
         let r = self.exec(r);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Create a Symbolic Link
     pub fn create_symlink(&mut self, path: &str, destination: String, opts: CreateSymlinkOptions) ->  Result<()> {
         let r = self.acx.create_symlink(self.fostate, path, destination, opts);
         let r = self.exec(r);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 
     /// Delete a File/Directory
     pub fn delete(&mut self, path: &str, opts: DeleteOptions) -> Result<bool> {
         let r = self.acx.delete(self.fostate, path, opts);
         let r = self.exec(r);
-        self.process_foresult(r)
+        self.foresult(r)
     }
 }
 
@@ -313,18 +304,12 @@ impl WriteHdfsFile {
     fn do_write(&mut self, buf: &[u8]) -> DResult<()> {
         let b: & 'static [u8] = unsafe { std::mem::transmute(buf) };
         self.cx.append(&self.path, crate::rest_client::data_borrowed(b), self.opts.clone())
-        //let f = self.cx.acx.append(self.cx.fostate, &self.path, crate::rest_client::data_borrowed(b), self.opts.clone());
-        //let r = self.cx.exec(f);
-        //self.cx.process_foresult(r)
     }
 
     #[cfg(not(feature = "zero-copy-on-write"))]
     fn do_write(&mut self, buf: &[u8]) -> DResult<()> {
         let b = buf.to_owned();
         self.cx.append(&self.path, crate::rest_client::data_owned(b), self.opts.clone())
-        //let f = self.cx.acx.append(self.cx.fostate, &self.path, crate::rest_client::data_owned(b), self.opts.clone());
-        //let r = self.cx.exec(f);
-        //self.cx.process_foresult(r)
     }
 }
 
