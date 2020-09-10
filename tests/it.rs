@@ -34,7 +34,7 @@ user={u}",
 e=entrypoint, n=natmap, u=user);
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
     let entrypoint_uri = "http://".to_owned() + &entrypoint;
-    let cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
+    let mut cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
         .natmap(nm)
         .user_name(user)
         .build()
@@ -147,7 +147,7 @@ s=source, r=readscript, t=target, w=writescript, z=size);
 
     assert_eq!(count, size as usize);
 
-    let (cx,_) = file.into_parts();
+    let (mut cx,_) = file.into_parts();
 
     //MKDIRS/DELETE(dir) test
     let dir_to_make = file_as_string("./test-data/dir-to-make");

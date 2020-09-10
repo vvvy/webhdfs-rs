@@ -1,4 +1,4 @@
-use std::future::Future;
+
 use futures::{Stream, FutureExt, StreamExt};
 use hyper::{
     Request, Response, Body, Uri,
@@ -13,22 +13,6 @@ use log::trace;
 use crate::error::*;
 use crate::datatypes::RemoteExceptionResponse;
 use crate::natmap::NatMapPtr;
-use crate::future_tools;
-
-
-#[inline]
-fn redirect_filter(res: Response<Body>) -> Result<Response<Body>> {
-    let status = res.status();
-    if status.is_redirection() {
-        if let Some(location) = res.headers().get(hyper::header::LOCATION) {
-            Err(Error::from_http_redirect(status.as_u16(), location.to_str()?.to_string()))
-        } else {
-            Err(app_error!(generic "Redirect without Location header"))
-        }
-    } else {
-        Ok(res)
-    }
-}
 
 /// Required response content-type
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -108,7 +92,7 @@ where R: serde::de::DeserializeOwned + Send {
 }
 
 #[inline]
-async fn extract_binary(res: Response<Body>) -> impl Stream<Item=Result<Bytes>> {
+async fn extract_binary(res: Response<Body>) -> impl Stream<Item=Result<Bytes>> + Unpin {
     trace!("HTTP Binary Response {} ct={:?} cl={:?}", 
         res.status(), 
         res.headers().get(hyper::header::CONTENT_TYPE), 
@@ -157,6 +141,31 @@ fn http_binary_body(request: RequestBuilder, payload: Data) -> Result<Request<Bo
     Ok(request.body(Body::from(payload))?)
 }
 
+/// Error that contains optional data recovered from an unsuccessful write operation
+pub struct ErrorD {
+    pub error: Error,
+    pub data_opt: Option<Data>
+}
+
+impl ErrorD {
+    #[inline]
+    pub fn new(error: Error, data_opt: Option<Data>) -> Self { Self { error, data_opt } }
+    #[inline]
+    pub fn d(error: Error, data: Data) -> Self { Self::new(error, Some(data)) }
+    #[inline]
+    pub fn lift(error: Error) -> Self { Self::new(error, None) }
+    #[inline]
+    pub fn drop(Self { error, data_opt: _ } : Self) -> Error { error }
+}
+
+impl From<tokio::time::Elapsed> for ErrorD {
+    fn from(e: tokio::time::Elapsed) -> Self { Self::lift(e.into()) }
+}
+
+/// Result with optional data recovered from error
+pub type DResult<T> = StdResult<T, ErrorD>;
+
+/// HTTP(S) client
 enum Httpx {
     Http(Client<HttpConnector, Body>),
     Https(Client<HttpsConnector<HttpConnector>, Body>)
@@ -232,91 +241,71 @@ impl HttpyClient {
     pub fn new(uri: Uri, natmap: NatMapPtr) -> Self { Self { uri, natmap } }
 
     #[inline]
-    async fn request_with_redirect<X, Y>(
-        self, 
-        rf0: impl FnOnce(Uri) -> X,
-        rf1: impl FnOnce(Uri) -> Y
-        ) -> Result<Response<Body>> 
-        where X: Future<Output=Result<Response<Body>>>, Y: Future<Output=Result<Response<Body>>> {
-
-        async fn handle_redirect<X>(
-            r: Result<Response<Body>>, 
-            natmap: NatMapPtr,
-            rf1: impl FnOnce(Uri) -> X
-            ) -> Result<Response<Body>> 
-            where X: Future<Output=Result<Response<Body>>> {
-            match r {
-                Ok(r) => Ok(r),
-                Err(e) => match e.to_http_redirect() {
-                    Ok((_code, location)) => match location.parse() {
-                        Ok(uri) => match natmap.translate(uri) { 
-                            Ok(uri) => rf1(uri).await,
-                            Err(e) => Err(e)
-                        }
-                        Err(e) => Err(app_error!((cause=e) "Cannot parse location URI returned by redirect"))
-                    }
-                    Err(e) => Err(e)
+    async fn redirect_uri(uri: Uri, method: Method, natmap: NatMapPtr)-> Result<Uri> {
+        let r = HttpxClient::new_get_like(uri, method).await;
+        match r {
+            Ok(b) => Err(app_error!(generic "Expected redirect, found non-redirect response status={}", b.status())),
+            Err(e) => match e.to_http_redirect() {
+                Ok((_code, location)) => match location.parse() {
+                    Ok(uri) => natmap.translate(uri),
+                    Err(e) => Err(app_error!((cause=e) "Cannot parse location URI returned by redirect"))
                 }
+                Err(e) => Err(e)
             }
         }
-        let Self { uri, natmap } = self;
-        let r0 = rf0(uri).await?;
-        let r1 = redirect_filter(r0);
-        handle_redirect(r1, natmap, rf1).await
     }
     
+    /// single-step request to nn (no redirects expected), no input, json output
     pub async fn get_json<R>(self) -> Result<R>
         where R: serde::de::DeserializeOwned + Send + 'static {
-        
-        let result = self.request_with_redirect( 
-            |uri| HttpxClient::new_get_like(uri, Method::GET), 
-            |uri| HttpxClient::new_get_like(uri, Method::GET)
-        ).await?;
+        let Self { uri, natmap:_ } = self;
+        let result = HttpxClient::new_get_like(uri, Method::GET).await?;
         let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
         extract_json(result_filtered).await
     }
 
-    pub fn get_binary(self) -> impl Stream<Item=Result<Bytes>> {
-        #[inline]
-        async fn binary_response(c: HttpyClient) -> Result<Response<Body>> {
-            let result = c.request_with_redirect( 
-                |uri| HttpxClient::new_get_like(uri, Method::GET), 
-                |uri| HttpxClient::new_get_like(uri, Method::GET)
-            ).await?;
-            error_and_ct_filter(RCT::Binary, result).await
+    /// two-step data retrieval request, no input, binary output.
+    /// returns pointer
+    pub async fn get_binary(self) -> Result<Box<dyn Stream<Item=Result<Bytes>> + Unpin>> {
+        let uri = HttpyClient::redirect_uri(self.uri, Method::GET, self.natmap).await?;
+        let result = HttpxClient::new_get_like(uri, Method::GET).await?;
+        let r = error_and_ct_filter(RCT::Binary, result).await?;
+        let xb = extract_binary(r).await;
+        Ok(Box::new(xb))
+    }
+
+    /// two-step data submission request, data input, empty output. data returned back on error
+    pub async fn post_binary(self, method: Method, data: Data) -> DResult<()> {
+        async fn inner(uri: Uri, method: Method, data: Data) -> Result<()> {
+            let result = HttpxClient::new_post_like(uri, method, data).await?;
+            let result_filtered = error_and_ct_filter(RCT::None, result).await?;
+            extract_empty(result_filtered).await
         }
 
-        //Type: Future<Result<Future<Stream<Result>>>>
-        let binary_stream_result = binary_response(self).map(|result| result.map(|resp| extract_binary(resp).flatten_stream()));
-
-        future_tools::simplify_future_stream_result(binary_stream_result)      
+        let Self { uri, natmap } = self;
+        match HttpyClient::redirect_uri(uri, method.clone(), natmap).await {
+            Ok(uri) => inner(uri, method, data).map(|fr| fr.map_err(ErrorD::lift)).await,
+            Err(e) => Err(ErrorD::d(e, data))
+        }
     }
 
-    pub async fn post_binary(self, method: Method, data: Data) -> Result<()> {
-        let method1 = method.clone();
-        let result = self.request_with_redirect(
-            |uri| HttpxClient::new_get_like(uri, method1), 
-            move |uri| HttpxClient::new_post_like(uri, method, data)
-        ).await?;
-        let result_filtered = error_and_ct_filter(RCT::None, result).await?;
-        extract_empty(result_filtered).await
-    }
-
-    /// No input, JSON output
+    /// two-step request, empty input, json output
     pub async fn op_json<R>(self, method: Method) -> Result<R> 
-     where R: serde::de::DeserializeOwned + Send + 'static{
-        let method1 = method.clone(); 
-        let result = self.request_with_redirect(
-            |uri| HttpxClient::new_get_like(uri, method1), 
-            move |uri| HttpxClient::new_post_like(uri, method, data_empty())
-        ).await?;
+     where R: serde::de::DeserializeOwned + Send + 'static {
+        let Self { uri, natmap } = self;
+        let uri = HttpyClient::redirect_uri(uri, method.clone(), natmap).await?;
+        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
         let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
         extract_json(result_filtered).await
     }
 
-    /// No input, no output
+    /// two-step request, empty input, empty output
     pub async fn op_empty(self, method: Method) -> Result<()> {
-        self.post_binary(method, data_empty()).await
+        let Self { uri, natmap } = self;
+        let uri = HttpyClient::redirect_uri(uri, method.clone(), natmap).await?;
+        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
+        let result_filtered = error_and_ct_filter(RCT::None, result).await?;
+        extract_empty(result_filtered).await
     }
     
 }
