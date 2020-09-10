@@ -49,6 +49,7 @@ impl Error {
             None => "GENERIC"
         }
     }
+    pub fn cause(&self) -> &Cause { &self.cause }
     pub fn from_http_redirect(status: u16, location: String) -> Self {
         Self::new(None, Cause::HttpRedirect(status, location))
     }
