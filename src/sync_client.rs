@@ -58,7 +58,7 @@ impl SyncHdfsClientBuilder {
     }
     pub fn delegation_token(self, dt: String) -> Self {
         Self { a: self.a.delegation_token(dt), ..self }
-    }
+    }    
     pub fn build(self) -> Result<SyncHdfsClient> {
          Ok(SyncHdfsClient { 
             acx: Rc::new(self.a.build()), 

@@ -6,10 +6,11 @@ use hyper::{
     body::aggregate
 };
 use hyper_tls::HttpsConnector;
+use native_tls::TlsConnector;
 use http::{uri::Scheme, request::Builder as RequestBuilder, method::Method};
 use bytes::{Bytes, Buf};
 use mime::Mime;
-use log::trace;
+use log::{debug,trace};
 use crate::error::*;
 use crate::datatypes::RemoteExceptionResponse;
 use crate::natmap::NatMapPtr;
@@ -23,6 +24,20 @@ enum RCT {
     JSON,
     /// Response must be application/octet-stream
     Binary
+}
+
+#[inline]
+fn redirect_filter(res: Response<Body>) -> Result<Response<Body>> {
+    let status = res.status();
+    if status.is_redirection() {
+        if let Some(location) = res.headers().get(hyper::header::LOCATION) {
+            Err(Error::from_http_redirect(status.as_u16(), location.to_str()?.to_string()))
+        } else {
+            Err(app_error!(generic "Redirect without Location header"))
+        }
+    } else {
+        Ok(res)
+    }
 }
 
 #[inline]
@@ -57,7 +72,8 @@ async fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Result<Re
     }
 
     let ct = content_type_extractor(&res)?;
-    if res.status().is_success() {
+    let status = res.status();
+    if status.is_success() {
         if match_mimes(&ct, ct_required) {
             Ok(res)
         } else {
@@ -76,7 +92,8 @@ async fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Result<Re
                 Err(e) => Err(app_error!(generic "JSON-error aggregation error: {}", e))
             }
         } else {
-            Err(app_error!(generic "Remote error w/o JSON content"))
+            debug!("Remote error w/o JSON content: {:?}", res);
+            Err(app_error!(generic "Remote error: {}, content-type: {:?}", status, ct))
         }
     }
 }
@@ -166,6 +183,7 @@ impl From<tokio::time::Elapsed> for ErrorD {
 pub type DResult<T> = StdResult<T, ErrorD>;
 
 /// HTTP(S) client
+/// TODO seems like HttpsConnector supports http:// urls as well, check it
 enum Httpx {
     Http(Client<HttpConnector, Body>),
     Https(Client<HttpsConnector<HttpConnector>, Body>)
@@ -174,7 +192,15 @@ enum Httpx {
 impl Httpx {
     fn new(uri: &Uri) -> Httpx {
         if Some(&Scheme::HTTPS) == uri.scheme() {
-            let connector = HttpsConnector::new();
+
+            let mut cb = TlsConnector::builder();
+            cb.danger_accept_invalid_certs(true);
+            cb.danger_accept_invalid_hostnames(true);
+            let tc = cb.build().unwrap_or_else(|e| panic!("HttpsConnector::new() failure: {}", e));
+            let mut hc = HttpConnector::new();
+            hc.enforce_http(false);
+            let connector = (hc, tc.into()).into();
+            //let connector = HttpsConnector::new();
             Httpx::Https(Client::builder().build::<_, hyper::Body>(connector))
         } else {
             Httpx::Http(Client::new())
@@ -242,8 +268,8 @@ impl HttpyClient {
 
     #[inline]
     async fn redirect_uri(uri: Uri, method: Method, natmap: NatMapPtr)-> Result<Uri> {
-        let r = HttpxClient::new_get_like(uri, method).await;
-        match r {
+        let r = HttpxClient::new_get_like(uri, method).await?;
+        match redirect_filter(r) {
             Ok(b) => Err(app_error!(generic "Expected redirect, found non-redirect response status={}", b.status())),
             Err(e) => match e.to_http_redirect() {
                 Ok((_code, location)) => match location.parse() {
@@ -263,6 +289,24 @@ impl HttpyClient {
         let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
         extract_json(result_filtered).await
     }
+
+    /// single-step mutation request (no redirects expected), empty input, json output
+    pub async fn op_json<R>(self, method: Method) -> Result<R> 
+     where R: serde::de::DeserializeOwned + Send + 'static {
+        let Self { uri, natmap: _ } = self;
+        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
+        let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
+        extract_json(result_filtered).await
+    }
+
+    /// single-step mutation request (no redirects expected), empty input, empty output
+    pub async fn op_empty(self, method: Method) -> Result<()> {
+        let Self { uri, natmap:_ } = self;
+        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
+        let result_filtered = error_and_ct_filter(RCT::None, result).await?;
+        extract_empty(result_filtered).await
+    }
+    
 
     /// two-step data retrieval request, no input, binary output.
     /// returns pointer
@@ -288,26 +332,6 @@ impl HttpyClient {
             Err(e) => Err(ErrorD::d(e, data))
         }
     }
-
-    /// two-step request, empty input, json output
-    pub async fn op_json<R>(self, method: Method) -> Result<R> 
-     where R: serde::de::DeserializeOwned + Send + 'static {
-        let Self { uri, natmap } = self;
-        let uri = HttpyClient::redirect_uri(uri, method.clone(), natmap).await?;
-        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
-        let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
-        extract_json(result_filtered).await
-    }
-
-    /// two-step request, empty input, empty output
-    pub async fn op_empty(self, method: Method) -> Result<()> {
-        let Self { uri, natmap } = self;
-        let uri = HttpyClient::redirect_uri(uri, method.clone(), natmap).await?;
-        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
-        let result_filtered = error_and_ct_filter(RCT::None, result).await?;
-        extract_empty(result_filtered).await
-    }
-    
 }
 
 

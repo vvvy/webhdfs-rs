@@ -3,4 +3,4 @@
 Cargo.lock
 /local
 /test-data
-/itt-config.sh
+/itt-config.*

@@ -3,6 +3,7 @@
 use webhdfs::{*, sync_client::*};
 //use ReadHdfsFile;
 
+use std::time::Duration;
 use std::fs::{File, read};
 use std::path::Path;
 use std::io::{Read, Write, Seek, SeekFrom};
@@ -24,21 +25,31 @@ fn webhdfs_test() {
         String::from_utf8_lossy(&read(path).expect("cannot file-as-stirng")).to_owned().to_string()
     }
 
+    fn file_as_string_opt(path: &str) -> Option<String> {
+        read(path).map(|s| String::from_utf8_lossy(&s).to_owned().to_string()).ok()
+    }
+
     let entrypoint = file_as_string("./test-data/entrypoint");
+    let alt_entrypoint = file_as_string_opt("./test-data/alt-entrypoint");
     let natmap = crate::config::read_kv_file("./test-data/natmap").expect("cannot read natmap");
-    let user = file_as_string("./test-data/user");
+    let user = file_as_string_opt("./test-data/user");
+    let dtoken = file_as_string_opt("./test-data/dtoken");
+    let scheme = file_as_string("./test-data/scheme");
     println!("
 entrypoint='{e}'
+alt_entrypoint='{ae:?}'
 natmap={n:?}
-user={u}", 
-e=entrypoint, n=natmap, u=user);
+user={u:?}
+dtoken={d:?}", 
+e=entrypoint, ae=alt_entrypoint, n=natmap, u=user, d=dtoken);
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
-    let entrypoint_uri = "http://".to_owned() + &entrypoint;
-    let mut cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
-        .natmap(nm)
-        .user_name(user)
-        .build()
-        .expect("cannot HdfsContext::new");
+    let entrypoint_uri = format!("{}://{}", scheme, entrypoint);
+    let b = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
+        .default_timeout(Duration::from_secs(180))
+        .natmap(nm);
+    let b = if let Some(w) = dtoken { b.delegation_token(w) } else { b };
+    let b = if let Some(w) = user { b.user_name(w) } else { b };
+    let mut cx = b.build().expect("cannot HdfsContext::new");
  
     let readscript = file_as_string("./test-data/readscript");
     let writescript = file_as_string("./test-data/writescript");
@@ -163,6 +174,10 @@ s=source, r=readscript, t=target, w=writescript, z=size);
     cx.delete(&dir_to_remove, DeleteOptions::new()).expect("delete (dir)");
     let x = cx.stat(&dir_to_remove).expect_err("delete(dir) failed");
     println!("{}", x);
+
+
+    //failover test
+    //TODO
 
     //if do_itt { run_shell("./itt.sh --validate", "Validation failed"); }
 
