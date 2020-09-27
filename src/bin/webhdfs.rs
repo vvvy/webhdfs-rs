@@ -5,7 +5,7 @@ fn main() {
     use std::path::Path;
     use std::fs::create_dir_all;
     use commandline::*;
-    let (client, op) = parse_command_line();
+    let (mut client, op) = parse_command_line();
 
     match op {
         Operation::Get(mut fs) => {

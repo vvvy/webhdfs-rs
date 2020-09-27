@@ -14,8 +14,8 @@ TESTFILE=soc-pokec-relationships.txt
 READSCRIPT=(r:128m s:0 r:1m r:128m)
 #A sequence of instructions to test write
 WRITE_SCRIPT=(0 10% 50% 70%)
-#Provisioner (vagrant or docker)
-PROVISIONER=vagrant
+#Provisioner (remote, vagrant or docker)
+PROVISIONER=remote
 #local directory where test data is maintained
 TESTDATA_DIR=./test-data
 #container directory TESTDATA_DIR maps to
@@ -37,15 +37,19 @@ C_WEBHDFS_DN_PORT=50075
 [ `uname -o` == "Cygwin" ] && { IS_CYGWIN=true ; DRIVES_CONTAINER=/cygdrive ; }
 grep -q Microsoft /proc/version && { IS_WSL=true ; DRIVES_CONTAINER=/mnt ; }
 
-if [ -x ./itt-config.sh ]; then . ./itt-config.sh ; fi
+if [ -f ./itt-config.sh ]; then . ./itt-config.sh ; fi
 
 [ -z "$N_C" ] && { [ $PROVISIONER == vagrant ] && N_C=1 || N_C=3 ; }
-[ $PROVISIONER == vagrant ] && HADOOP_USER=vagrant || HADOOP_USER=root
+[ -z "$HADOOP_USER" ] && { [ $PROVISIONER == vagrant ] && HADOOP_USER=vagrant || HADOOP_USER=root ; }
 [ -z "$HDFS_DIR" ] && HDFS_DIR=/user/$HADOOP_USER/test-data
 LOCALHOST=localhost
 ENTRYPOINT=$TESTDATA_DIR/entrypoint
+ALT_ENTRYPOINT=$TESTDATA_DIR/alt-entrypoint
 NATMAP=$TESTDATA_DIR/natmap
+TUNNELS=$TESTDATA_DIR/tunnels
 USERFILE=$TESTDATA_DIR/user
+SCHEME=$TESTDATA_DIR/scheme
+DTFILE=$TESTDATA_DIR/dtoken
 #read-write test
 TESTFILE_W=$TESTFILE.w
 SOURCE=$TESTDATA_DIR/$TESTFILE
@@ -71,6 +75,21 @@ DIR2RMFILE=$TESTDATA_DIR/dir-to-remove
 #Test system tools
 
 case $PROVISIONER in
+
+remote)
+
+c-up() {
+    true
+}
+
+c-dn() {
+    true
+}
+
+c-ssh() {
+    ssh $(cat $TUNNELS) $SSH_ARGS $SSH_TARGET
+}
+;;
 
 vagrant)
 
@@ -147,9 +166,67 @@ get-hostname() {
     exit 2
 esac
 
+
+case $PROVISIONER in
+
+remote)
+
+L_ENTRYPOINT_PORT=51070
+L_ALT_ENTRYPOINT_PORT=51071
+L_DN_PORT_BASE=51075
+
 #create entrypoint, user, NAT mappings
 create-webhdfs-config() {
-    echo -n $HADOOP_USER > $USERFILE
+    echo -n https > $SCHEME
+    if [ -n "$DTOKEN" ] ; then
+        echo -n $DTOKEN > $DTFILE
+    else
+        echo -n $HADOOP_USER > $USERFILE
+    fi
+    > $NATMAP
+    echo $R_NN1=$LOCALHOST:$L_ENTRYPOINT_PORT >> $NATMAP
+    ssh_tunnels="-L $L_ENTRYPOINT_PORT:$R_NN1"
+    echo -n $LOCALHOST:$L_ENTRYPOINT_PORT > $ENTRYPOINT
+    [ -z "$R_NN2" ] || {
+        echo $R_NN2=$LOCALHOST:$L_ALT_ENTRYPOINT_PORT >> $NATMAP
+        ssh_tunnels+=" -L $L_ALT_ENTRYPOINT_PORT:$R_NN2"
+        echo -n $LOCALHOST:$L_ALT_ENTRYPOINT_PORT > $ALT_ENTRYPOINT
+    }
+    n=0
+    for dn in ${R_DN[*]}
+    do
+        l_dn_port=$(($L_DN_PORT_BASE + 1000 * $n))
+        echo $dn=$LOCALHOST:$l_dn_port >> $NATMAP
+        ssh_tunnels+=" -L $l_dn_port:$dn"
+        n=$(($n + 1))
+    done
+    echo $ssh_tunnels > $TUNNELS
+}
+
+gw-exec() {
+    ssh $SSH_ARGS $SSH_TARGET "$@"
+}
+
+gw-get() {
+    scp $SSH_ARGS $SSH_TARGET:$1 $2 
+}
+
+gw-put() {
+    scp $SSH_ARGS $1 $SSH_TARGET:$2
+}
+
+;;
+
+docker|vagrant)
+
+#create entrypoint, user, NAT mappings
+create-webhdfs-config() {
+    echo -n https > $SCHEME
+    if [ -n "$DTOKEN" ] ; then
+        echo -n $DTOKEN > $DTFILE
+    else
+        echo -n $HADOOP_USER > $USERFILE
+    fi
     > $NATMAP
     for CN in `seq 1 $N_C` ; do
         C_HOSTNAME=`get-hostname $CN`
@@ -171,9 +248,27 @@ create-webhdfs-config() {
     done       
 }
 
+gw-exec() {
+    c-exec 1 "$@"
+}
+
+gw-get() {
+    true
+}
+
+gw-put() {
+    true
+}
+
+;;
+*)
+    echo "Invalid PROVISIONER setting" >&2
+    exit 2
+esac
+
 
 cleanup-webhdfs-config() {
-    rm -f $NATMAP $ENTRYPOINT $USERFILE
+    rm -f $NATMAP $ENTRYPOINT $ALT_ENTRYPOINT $USERFILE $TUNNELS $SCHEME $DTFILE
 }
 
 #=======================================================================================================
@@ -312,7 +407,8 @@ validate-read() {
 validate-write() {
     local orig=(`cat $CHECKSUMFILE`)
     # "\>" makes redirection happen inside a container/VM
-    c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE_W \> $C_CHAL_CHECKSUMFILE
+    gw-exec hdfs dfs -checksum $HDFS_DIR/$TESTFILE_W \> $C_CHAL_CHECKSUMFILE
+    gw-get $C_CHAL_CHECKSUMFILE $CHAL_CHECKSUMFILE
     local chal=(`cat $CHAL_CHECKSUMFILE`)
     rm $CHAL_CHECKSUMFILE
     if [ "${orig[1]}" == "${chal[1]}" -a "${orig[2]}" == "${chal[2]}" ]
@@ -329,20 +425,23 @@ validate-write() {
 #put the test file to HDFS and a checksum file locally
 # "\>" makes redirection happen inside a container/VM
 upload() {
-    c-exec 1 hdfs dfs -mkdir -p $HDFS_DIR
-    c-exec 1 hdfs dfs -put -f $C_TESTDATA_DIR/$TESTFILE $HDFS_DIR
-    c-exec 1 hdfs dfs -checksum $HDFS_DIR/$TESTFILE \> $C_CHECKSUMFILE
+    gw-exec mkdir -p $C_TESTDATA_DIR
+    gw-exec hdfs dfs -mkdir -p $HDFS_DIR
+    gw-put $TESTDATA_DIR/$TESTFILE $C_TESTDATA_DIR
+    gw-exec hdfs dfs -put -f $C_TESTDATA_DIR/$TESTFILE $HDFS_DIR
+    gw-exec hdfs dfs -checksum $HDFS_DIR/$TESTFILE \> $C_CHECKSUMFILE
+    gw-get $C_CHECKSUMFILE $TESTDATA_DIR
 }
 
 cleanup-test-output-rwtest() {
-    c-exec 1 hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE_W
+    gw-exec hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE_W
 }
 
 cleanup-rwtest() {
     rm -f $SHASUMS $CHECKSUMFILE $SIZEFILE 
     rm -f $SOURCEPATHFILE $READSCRIPTFILE $TARGETPATHFILE $WRITESCRIPTFILE
     rm -f $SEGFILE_PREFIX* $WSEGFILE_PREFIX*
-    c-exec 1 hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE
+    gw-exec hdfs dfs -rm -f -skipTrash $HDFS_DIR/$TESTFILE
 }
 
 prepare-all-rwtest() {
@@ -377,11 +476,11 @@ prepare-all-mkrmdirtest() {
 }
 prepare-hdfs-mkrmdirtest() { true ; }
 create-test-input-mkrmdirtest() {
-    c-exec 1 hdfs dfs -mkdir $HDFS_DIR/$DIR2RM
+    gw-exec hdfs dfs -mkdir $HDFS_DIR/$DIR2RM
 }
 validate-mkrmdirtest() { true; }
 cleanup-test-output-mkrmdirtest() {
-    c-exec 1 hdfs dfs -rm -r -f -skipTrash $HDFS_DIR/$DIR2MK $HDFS_DIR/$DIR2RM
+    gw-exec hdfs dfs -rm -r -f -skipTrash $HDFS_DIR/$DIR2MK $HDFS_DIR/$DIR2RM
 }
 
 cleanup-mkrmdirtest() {
@@ -481,6 +580,10 @@ $0 --cleanup
     Cleans up everything.
 $0 --c-exec <command>
     Execute command inside 1st VM or container
+$0 --c-ssh
+    ssh to the gateway WM or container. If remote is used, this also establishes tunnels to namenodes and datanodes
+$0 --eval <command>
+    evaluate in context. useful for debugging
 
 Additional Vagrant only commands: --c-up, --c-dn, --c-ssh
 EOF
@@ -500,7 +603,7 @@ EOF
     --prepare-hdfs)
         prepare-hdfs
         ;;
-     --create-test-input)
+    --create-test-input)
         create-test-input
         ;;
     --cleanup-test-output)
@@ -510,10 +613,14 @@ EOF
     --c-dn)    c-dn ;;
     --c-exec)
         shift
-        c-exec 1 "$*"
+        gw-exec "$*"
         ;;
     --c-ssh)
         c-ssh
+        ;;
+    --eval)
+        shift
+        eval "$@"
         ;;
     *)
         echo Invalid option $1 >&2

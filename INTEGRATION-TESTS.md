@@ -1,11 +1,81 @@
 # `webhdfs` integration tests
 
-Intergation tests are set up with Apache Bigtop provisioner vagrant (typically 1-node) or docker (typically 3-node) cluster.
+The following methods are supported for integration testing:
+
+1. Remote: use a remote Hadoop cluster via ssh (`PROVISIONER=remote`)
+2. Local: use an Apache Bigtop cluster locally deployed in docker (`PROVISIONER=docker`) or vagrant (`PROVISIONER=vagrant`)
+
 The test process itself runs on the host. See comments in [`itt.sh`](itt.sh) and `itt.sh --help` for details.
 
 DISCLAIMER: the integration tests were developed on a Windows 10 machine (using Docker Desktop and both Cygwin and WSL). While the best effort was made to ensure Linux and OS X compatibility, the test scripts have not been tested there (yet), and may contain bugs. Sholud you notice any bugs and incompatibilies, please create an issue in the webhdfs Github project.
 
-## Preparation
+## Remote method
+
+This the default and the recommended method. It is inherently agnostic to Hadoop version being tested under. 
+
+You will need a remote Hadoop cluster available over ssh. SSH tunelling is used for port forwarding, and scp is used to bring local files to the remote system and vice versa.
+
+To run the script, you need WSL installed on the local computer.
+
+In the local configuration file, add the following settings (mandatory unless otherwise specified):
+
+```bash
+#Remote namenode 1 host:port
+R_NN1=nn1:50070
+
+#Remote namenode 2 host:port (optional)
+R_NN2=nn2:50070
+
+#Remote host:ports of datanodes
+R_DN=(dn0001:50075 dn0002:50075 dn0003:50075) 
+
+#SSH connection string, format: user@host[:port] 
+SSH_TARGET=root@10.1.1.99
+
+#Adidional SSH arguments (jump hosts, etc) (optional)
+SSH_ARGS="-J root@10.1.1.33:22"
+
+#Delegation token (optional unless Kerberos authentication is enabled on the cluster)
+DTOKEN="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+#Hadoop user name
+HADOOP_USER=huser
+
+#remote intermediate directory (optional). This defaults to /test-data, so you would likely want to change that
+C_TESTDATA_DIR=/tmp/test-data 
+
+```
+
+In order for the test to succeed, ensure the following:
+
+1. Any necessary public and private keys are configured so there is no need for ssh password throughout the test script
+2. `hdfs` command is available for the ssh user at the ssh target machine, and is directly executable (i.e. available in the PATH)
+3. The local filesystem of the ssh target host has free space at least three times the size of the test file.
+
+If Kerberos authentication is enabled on the remote cluster:
+
+1. The ssh user that logs on the remote cluster must have a valid Kerberos TGT issued to the username specified 
+as `HADOOP_USER` (via e.g. `kinit huser`).
+2. A valid delegation token must be issued and specified as `DTOKEN`. The following command sequence may be used to obtain the token:
+
+```bash
+#Fetch the token into `dt`
+hadoop dtutil get hdfs://$CLUSTERNAME dt
+#or 
+hdfs fetchdt dt
+#Then print it. 
+hadoop dtutil print dt
+#Paste `URL enc token` as the value of DTOKEN
+```
+
+## Local methods
+
+Local methods are set up with Apache Bigtop provisioner vagrant (typically 1-node) or docker (typically 3-node) cluster. 
+
+Shared folders is used for file exchange, and port mappings are used for port forwarding.
+
+
+### Preparation
 
 1. Install prerequisites
 * either docker or vagrant
@@ -86,7 +156,8 @@ The program under test is expected to execute the `READSCRIPT` below (actually, 
 Upon each read, the program reads from the testfile (HDFS) then writes the content read to a file specified by 3rd part of `READSCRIPTOUT` 
 item. Finally, checksums for newly written chunks are validated against pre-calculated checksums.
 
-### hooks
+## Hooks
+
 1. place all local settings in `./itt-config.sh` and make it `chmod a+x`
 2. if using a test file other than standard, or using the standard one but pre-downloaded, or using other source, 
     place the test file materialzation command(s) in `./test-data./create-source-script` and make it `chmod a+x`. 
@@ -97,8 +168,10 @@ item. Finally, checksums for newly written chunks are validated against pre-calc
 
 ## Running the test
 
-1. Bring the Bigtop cluster up
-2. Run `itt.sh --run`
+1. Make sure the cluster is up and running. For local methods, bring the Bigtop cluster up.
+2. Remote method only: in a separate terminal, run `./itt.sh --c-ssh`. This establishes the ssh link to the remote system, 
+   enabling port forwarding via ssh tunnels. The link should be up during the entire test.
+2. Run `itt.sh --run`.
 3. Look for the following terminating line in the output from `itt.sh --run`:
 
 ```

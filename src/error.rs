@@ -17,6 +17,7 @@ pub enum Cause {
     HttpInvalidUri(http::uri::InvalidUri),
     HttpInvalidUriParts(http::uri::InvalidUriParts),
     Io(std::io::Error),
+    Tls(native_tls::Error),
     //IntConversion(std::num::TryFromIntError),
     RemoteException(crate::datatypes::RemoteException),
     HttpRedirect(u16, String),
@@ -49,6 +50,7 @@ impl Error {
             None => "GENERIC"
         }
     }
+    pub fn cause(&self) -> &Cause { &self.cause }
     pub fn from_http_redirect(status: u16, location: String) -> Self {
         Self::new(None, Cause::HttpRedirect(status, location))
     }
@@ -75,6 +77,7 @@ impl Display for Error {
             Cause::HttpInvalidUri(e) => write!(f, "; caused by http::uri::InvalidUri: {}", e),
             Cause::HttpInvalidUriParts(e) => write!(f, "; caused by http::uri::InvalidUriParts: {}", e),
             Cause::Io(e) => write!(f, "; caused by IoError: {}", e),
+            Cause::Tls(e) => write!(f, "; caused by native_tls::Error: {}", e),
             //Cause::IntConversion(e) => write!(f, "; caused by std::num::TryFromIntError: {}", e),
             Cause::RemoteException(e) => write!(f, "; caused by RemoteException {}", e),
             Cause::HttpRedirect(code, location) => write!(f, "; caused by HTTP redirect {} {}", code, location),
@@ -96,6 +99,7 @@ impl std::error::Error for Error {
             Cause::HttpInvalidUri(e) => Some(e),
             Cause::HttpInvalidUriParts(e) => Some(e),
             Cause::Io(e) => Some(e),
+            Cause::Tls(e) => Some(e),
             //Cause::IntConversion(e) => Some(e),
             Cause::RemoteException(e) => Some(e),
             Cause::HttpRedirect(_, _) => None,
@@ -202,6 +206,7 @@ error_conversions!{
     HttpInvalidUri(http::uri::InvalidUri),
     HttpInvalidUriParts(http::uri::InvalidUriParts),
     Io(std::io::Error),
+    Tls(native_tls::Error),
     //IntConversion(std::num::TryFromIntError),
     RemoteException(crate::datatypes::RemoteException)
 }

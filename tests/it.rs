@@ -1,17 +1,23 @@
 //Integration test for webhdfs-rs
 
-use webhdfs::{*, sync_client::*};
+use webhdfs::{*, sync_client::*, config::HttpsConfig};
 //use ReadHdfsFile;
 
+use std::time::Duration;
 use std::fs::{File, read};
 use std::path::Path;
 use std::io::{Read, Write, Seek, SeekFrom};
 use std::convert::TryInto;
 
 
+
+
 #[test]
 fn webhdfs_test() {
     println!("Integration test -- start");
+    //env_logger::init();
+    let _ = env_logger::builder().is_test(true).try_init();
+
 
     //let do_itt = if let Ok(..) = std::env::var("WEBHDFS_BYPASS_ITT") { false } else { true };
     //fn run_shell(cmdline: &str, msg: &'static str) {
@@ -19,27 +25,47 @@ fn webhdfs_test() {
     //    assert!(Command::new("bash").arg("-c").arg(cmdline).status().expect("could not run bash").success(), msg)
     //}
     //if do_itt { run_shell("./itt.sh --prepare", "Could not prepare"); }
-
+    
     fn file_as_string(path: &str) -> String {
         String::from_utf8_lossy(&read(path).expect("cannot file-as-stirng")).to_owned().to_string()
     }
+    
+    fn file_as_string_opt(path: &str) -> Option<String> {
+        read(path).map(|s| String::from_utf8_lossy(&s).to_owned().to_string()).ok()
+    }
 
     let entrypoint = file_as_string("./test-data/entrypoint");
+    let alt_entrypoint = file_as_string_opt("./test-data/alt-entrypoint");
+    let has_alt_entrypoint = alt_entrypoint.is_some();
+
     let natmap = crate::config::read_kv_file("./test-data/natmap").expect("cannot read natmap");
-    let user = file_as_string("./test-data/user");
+    let user = file_as_string_opt("./test-data/user");
+    let dtoken = file_as_string_opt("./test-data/dtoken");
+    let scheme = file_as_string("./test-data/scheme");
     println!("
 entrypoint='{e}'
+alt_entrypoint='{ae:?}'
 natmap={n:?}
-user={u}", 
-e=entrypoint, n=natmap, u=user);
+user={u:?}
+dtoken={d:?}", 
+e=entrypoint, ae=alt_entrypoint, n=natmap, u=user, d=dtoken);
     let nm = NatMap::new(natmap.into_iter()).expect("cannot build natmap");
-    let entrypoint_uri = "http://".to_owned() + &entrypoint;
-    let cx = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
+    let mut https_config = HttpsConfig::new();
+    https_config.danger_accept_invalid_certs = Some(true);
+    https_config.danger_accept_invalid_hostnames = Some(true);
+    let entrypoint_uri = format!("{}://{}", scheme, entrypoint);
+    let b = SyncHdfsClientBuilder::new(entrypoint_uri.parse().expect("Cannot parse entrypoint"))
+        .default_timeout(Duration::from_secs(180))
         .natmap(nm)
-        .user_name(user)
-        .build()
-        .expect("cannot HdfsContext::new");
- 
+        .https_settings(https_config.into());
+    let b = if let Some(w) = alt_entrypoint {
+        let alt_entrypoint_uri = format!("{}://{}", scheme, w);
+        b.alt_entrypoint(alt_entrypoint_uri.parse().expect("Cannot parse alt_entrypoint")) 
+    } else { b };
+    let b = if let Some(w) = dtoken { b.delegation_token(w) } else { b };
+    let b = if let Some(w) = user { b.user_name(w) } else { b };
+    let mut cx = b.build().expect("cannot HdfsContext::new");
+
     let readscript = file_as_string("./test-data/readscript");
     let writescript = file_as_string("./test-data/writescript");
     let source = file_as_string("./test-data/source");
@@ -147,7 +173,7 @@ s=source, r=readscript, t=target, w=writescript, z=size);
 
     assert_eq!(count, size as usize);
 
-    let (cx,_) = file.into_parts();
+    let (mut cx,_) = file.into_parts();
 
     //MKDIRS/DELETE(dir) test
     let dir_to_make = file_as_string("./test-data/dir-to-make");
@@ -163,6 +189,41 @@ s=source, r=readscript, t=target, w=writescript, z=size);
     cx.delete(&dir_to_remove, DeleteOptions::new()).expect("delete (dir)");
     let x = cx.stat(&dir_to_remove).expect_err("delete(dir) failed");
     println!("{}", x);
+
+
+    //failover test
+    if has_alt_entrypoint {
+        println!("Failover test");
+        let standby_state = cx.fostate().next();
+        let mut cx = cx.with_fostate(standby_state);
+        let dir_resp = cx.dir(source_dir);
+        println!("Dir: {:?}", dir_resp);
+        //assert_eq!(source_fn, dir_resp.unwrap().file_statuses.file_status[0].path_suffix);
+        dir_resp.unwrap().file_statuses.file_status.into_iter().find(|fs| fs.path_suffix == source_fn)
+        .ok_or("cannot find sourcefile in hdfs")
+        .unwrap();
+
+        //do the same again - to make sure the correct state was memoized on the previous step
+        //the 1st request should go directly to the active node (consult the logs)
+        let dir_resp = cx.dir(source_dir);
+        println!("Dir(2): {:?}", dir_resp);
+        //assert_eq!(source_fn, dir_resp.unwrap().file_statuses.file_status[0].path_suffix);
+        dir_resp.unwrap().file_statuses.file_status.into_iter().find(|fs| fs.path_suffix == source_fn)
+        .ok_or("cannot find sourcefile in hdfs")
+        .unwrap();
+
+        //TODO: test all other control paths (get/put binary, op_json, op_empty)starting in standby nn state
+        //at least read and write (small chunks/files)
+
+        //get binary
+        let cx = cx.with_fostate(standby_state);
+        let mut file = ReadHdfsFile::open(cx, source.clone()).unwrap();
+        let mut b = Vec::with_capacity(1024);
+        b.resize(b.capacity(), 0);
+        file.read(&mut b).unwrap();
+    } else {
+        println!("No alt_entrypoint specified -- skip failover test");
+    }
 
     //if do_itt { run_shell("./itt.sh --validate", "Validation failed"); }
 

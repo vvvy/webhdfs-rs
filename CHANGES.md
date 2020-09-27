@@ -1,13 +1,15 @@
 # webhdfs
 
-### Version 0.1.0
+### Version 0.3.0
 
-Initial release. Only reads from HDFS.
+* Namenode failover handling
+* Configuration for HTTPS
+* Remote intergration test method
 
-### Version 0.2.0
+### Version 0.2.2
 
-* Added write
-* Added basic FS mutations: `MKDIRS`, `DELETE`, `RENAME`, `CONCAT`, `SYMLINK`
+* Migration to async await
+* Bump versions of `hyper`, `hyper-tls`, `tokio`, `futures`, `http`, `bytes`
 
 ### Version 0.2.1
 
@@ -16,7 +18,14 @@ Initial release. Only reads from HDFS.
 * NAT mapings can be specified in `webhdfs.toml`
 * Misc doc fixes and enhancements
 
-### Version 0.2.2
+### Version 0.2.0
 
-* Migration to async await
-* Bump versions of `hyper`, `hyper-tls`, `tokio`, `futures`, `http`, `bytes`
+* Added write
+* Added basic FS mutations: `MKDIRS`, `DELETE`, `RENAME`, `CONCAT`, `SYMLINK`
+
+### Version 0.1.0
+
+Initial release. Only reads from HDFS.
+
+
+
