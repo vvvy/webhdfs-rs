@@ -6,7 +6,6 @@ use hyper::{
     body::aggregate
 };
 use hyper_tls::HttpsConnector;
-use native_tls::TlsConnector;
 use http::{uri::Scheme, request::Builder as RequestBuilder, method::Method};
 use bytes::{Bytes, Buf};
 use mime::Mime;
@@ -14,6 +13,7 @@ use log::{debug,trace};
 use crate::error::*;
 use crate::datatypes::RemoteExceptionResponse;
 use crate::natmap::NatMapPtr;
+use crate::https::*;
 
 /// Required response content-type
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -182,6 +182,18 @@ impl From<tokio::time::Elapsed> for ErrorD {
 /// Result with optional data recovered from error
 pub type DResult<T> = StdResult<T, ErrorD>;
 
+
+pub struct HttpxEndpoint {
+    uri: Uri,
+    https_settings: Option<HttpsSettingsPtr>
+}
+
+impl HttpxEndpoint {
+    pub fn new(uri: Uri, https_settings: Option<HttpsSettingsPtr>) -> Self { Self { uri, https_settings }  }
+    //pub fn uri(&self) -> &Uri { &self.uri }
+    pub fn https_settings(&self) -> &Option<HttpsSettingsPtr> { &self.https_settings }
+}
+
 /// HTTP(S) client
 /// TODO seems like HttpsConnector supports http:// urls as well, check it
 enum Httpx {
@@ -190,17 +202,13 @@ enum Httpx {
 }
 
 impl Httpx {
-    fn new(uri: &Uri) -> Httpx {
-        if Some(&Scheme::HTTPS) == uri.scheme() {
-
-            let mut cb = TlsConnector::builder();
-            cb.danger_accept_invalid_certs(true);
-            cb.danger_accept_invalid_hostnames(true);
-            let tc = cb.build().unwrap_or_else(|e| panic!("HttpsConnector::new() failure: {}", e));
-            let mut hc = HttpConnector::new();
-            hc.enforce_http(false);
-            let connector = (hc, tc.into()).into();
-            //let connector = HttpsConnector::new();
+    fn new(endpoint: &HttpxEndpoint) -> Httpx {
+        if Some(&Scheme::HTTPS) == endpoint.uri.scheme() {
+            let connector = if let Some(cfg) = &endpoint.https_settings {
+                https_connector(cfg)
+            } else {
+                HttpsConnector::new()
+            };
             Httpx::Https(Client::builder().build::<_, hyper::Body>(connector))
         } else {
             Httpx::Http(Client::new())
@@ -221,7 +229,7 @@ struct HttpxClient {
 
 impl HttpxClient
 {
-    fn new(uri: &Uri) -> Self { Self { endpoint: Httpx::new(uri) } }
+    fn new(endpoint: &HttpxEndpoint) -> Self { Self { endpoint: Httpx::new(endpoint) } }
 
     #[inline]
     fn create_request(&self, method: Method, uri: Uri) -> RequestBuilder {
@@ -249,31 +257,35 @@ impl HttpxClient
         Ok(response)
     }
 
-    async fn new_get_like(uri: Uri, method: Method) -> Result<Response<Body>> {
-        Self::new(&uri).get_like_future(uri, method).await
+    async fn new_get_like(endpoint: HttpxEndpoint, method: Method) -> Result<Response<Body>> {
+        Self::new(&endpoint).get_like_future(endpoint.uri, method).await
     }
 
-    async fn new_post_like(uri: Uri, method: Method, payload: Data) -> Result<Response<Body>> {
-        Self::new(&uri).post_like_future(uri, method, payload).await
+    async fn new_post_like(endpoint: HttpxEndpoint, method: Method, payload: Data) -> Result<Response<Body>> {
+        Self::new(&endpoint).post_like_future(endpoint.uri, method, payload).await
     }
 }
 
 pub struct HttpyClient {
-    uri: Uri, 
+    endpoint: HttpxEndpoint, 
     natmap: NatMapPtr
 }
 
 impl HttpyClient {
-    pub fn new(uri: Uri, natmap: NatMapPtr) -> Self { Self { uri, natmap } }
+    pub fn new(endpoint: HttpxEndpoint, natmap: NatMapPtr) -> Self { Self { endpoint, natmap } }
 
     #[inline]
-    async fn redirect_uri(uri: Uri, method: Method, natmap: NatMapPtr)-> Result<Uri> {
-        let r = HttpxClient::new_get_like(uri, method).await?;
+    async fn redirect_uri(endpoint: HttpxEndpoint, method: Method, natmap: NatMapPtr)-> Result<HttpxEndpoint> {
+        let https_settings = endpoint.https_settings().clone();
+        let r = HttpxClient::new_get_like(endpoint, method).await?;
+        trace!("Redirect: Response {} location={:?}", 
+            r.status(), r.headers().get(hyper::header::LOCATION) 
+        );
         match redirect_filter(r) {
             Ok(b) => Err(app_error!(generic "Expected redirect, found non-redirect response status={}", b.status())),
             Err(e) => match e.to_http_redirect() {
                 Ok((_code, location)) => match location.parse() {
-                    Ok(uri) => natmap.translate(uri),
+                    Ok(uri) => Ok(HttpxEndpoint::new(natmap.translate(uri)?, https_settings)),
                     Err(e) => Err(app_error!((cause=e) "Cannot parse location URI returned by redirect"))
                 }
                 Err(e) => Err(e)
@@ -284,8 +296,8 @@ impl HttpyClient {
     /// single-step request to nn (no redirects expected), no input, json output
     pub async fn get_json<R>(self) -> Result<R>
         where R: serde::de::DeserializeOwned + Send + 'static {
-        let Self { uri, natmap:_ } = self;
-        let result = HttpxClient::new_get_like(uri, Method::GET).await?;
+        let Self { endpoint, natmap:_ } = self;
+        let result = HttpxClient::new_get_like(endpoint, Method::GET).await?;
         let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
         extract_json(result_filtered).await
     }
@@ -293,16 +305,16 @@ impl HttpyClient {
     /// single-step mutation request (no redirects expected), empty input, json output
     pub async fn op_json<R>(self, method: Method) -> Result<R> 
      where R: serde::de::DeserializeOwned + Send + 'static {
-        let Self { uri, natmap: _ } = self;
-        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
+        let Self { endpoint, natmap: _ } = self;
+        let result = HttpxClient::new_post_like(endpoint, method, data_empty()).await?;
         let result_filtered = error_and_ct_filter(RCT::JSON, result).await?;
         extract_json(result_filtered).await
     }
 
     /// single-step mutation request (no redirects expected), empty input, empty output
     pub async fn op_empty(self, method: Method) -> Result<()> {
-        let Self { uri, natmap:_ } = self;
-        let result = HttpxClient::new_post_like(uri, method, data_empty()).await?;
+        let Self { endpoint, natmap:_ } = self;
+        let result = HttpxClient::new_post_like(endpoint, method, data_empty()).await?;
         let result_filtered = error_and_ct_filter(RCT::None, result).await?;
         extract_empty(result_filtered).await
     }
@@ -311,7 +323,8 @@ impl HttpyClient {
     /// two-step data retrieval request, no input, binary output.
     /// returns pointer
     pub async fn get_binary(self) -> Result<Box<dyn Stream<Item=Result<Bytes>> + Unpin>> {
-        let uri = HttpyClient::redirect_uri(self.uri, Method::GET, self.natmap).await?;
+        let Self { endpoint, natmap } = self;
+        let uri = HttpyClient::redirect_uri(endpoint, Method::GET, natmap).await?;
         let result = HttpxClient::new_get_like(uri, Method::GET).await?;
         let r = error_and_ct_filter(RCT::Binary, result).await?;
         let xb = extract_binary(r).await;
@@ -320,15 +333,15 @@ impl HttpyClient {
 
     /// two-step data submission request, data input, empty output. data returned back on error
     pub async fn post_binary(self, method: Method, data: Data) -> DResult<()> {
-        async fn inner(uri: Uri, method: Method, data: Data) -> Result<()> {
-            let result = HttpxClient::new_post_like(uri, method, data).await?;
+        async fn inner(endpoint: HttpxEndpoint, method: Method, data: Data) -> Result<()> {
+            let result = HttpxClient::new_post_like(endpoint, method, data).await?;
             let result_filtered = error_and_ct_filter(RCT::None, result).await?;
             extract_empty(result_filtered).await
         }
 
-        let Self { uri, natmap } = self;
-        match HttpyClient::redirect_uri(uri, method.clone(), natmap).await {
-            Ok(uri) => inner(uri, method, data).map(|fr| fr.map_err(ErrorD::lift)).await,
+        let Self { endpoint, natmap } = self;
+        match HttpyClient::redirect_uri(endpoint, method.clone(), natmap).await {
+            Ok(endpoint) => inner(endpoint, method, data).map(|fr| fr.map_err(ErrorD::lift)).await,
             Err(e) => Err(ErrorD::d(e, data))
         }
     }

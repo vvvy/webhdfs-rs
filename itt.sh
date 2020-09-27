@@ -14,8 +14,8 @@ TESTFILE=soc-pokec-relationships.txt
 READSCRIPT=(r:128m s:0 r:1m r:128m)
 #A sequence of instructions to test write
 WRITE_SCRIPT=(0 10% 50% 70%)
-#Provisioner (direct, vagrant or docker)
-PROVISIONER=direct
+#Provisioner (remote, vagrant or docker)
+PROVISIONER=remote
 #local directory where test data is maintained
 TESTDATA_DIR=./test-data
 #container directory TESTDATA_DIR maps to
@@ -76,7 +76,7 @@ DIR2RMFILE=$TESTDATA_DIR/dir-to-remove
 
 case $PROVISIONER in
 
-direct)
+remote)
 
 c-up() {
     true
@@ -169,7 +169,7 @@ esac
 
 case $PROVISIONER in
 
-direct)
+remote)
 
 L_ENTRYPOINT_PORT=51070
 L_ALT_ENTRYPOINT_PORT=51071
@@ -178,7 +178,7 @@ L_DN_PORT_BASE=51075
 #create entrypoint, user, NAT mappings
 create-webhdfs-config() {
     echo -n https > $SCHEME
-    if [ -nz "$DTOKEN" ] ; then
+    if [ -n "$DTOKEN" ] ; then
         echo -n $DTOKEN > $DTFILE
     else
         echo -n $HADOOP_USER > $USERFILE
@@ -222,7 +222,7 @@ docker|vagrant)
 #create entrypoint, user, NAT mappings
 create-webhdfs-config() {
     echo -n https > $SCHEME
-    if [ -nz "$DTOKEN" ] ; then
+    if [ -n "$DTOKEN" ] ; then
         echo -n $DTOKEN > $DTFILE
     else
         echo -n $HADOOP_USER > $USERFILE
@@ -581,7 +581,7 @@ $0 --cleanup
 $0 --c-exec <command>
     Execute command inside 1st VM or container
 $0 --c-ssh
-    ssh to the gateway WM or container. If direct is used, this also establishes tunnels to namenodes and datanodes
+    ssh to the gateway WM or container. If remote is used, this also establishes tunnels to namenodes and datanodes
 $0 --eval <command>
     evaluate in context. useful for debugging
 

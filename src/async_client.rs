@@ -1,5 +1,4 @@
 //! Asynchronous WebHDFS client implementation
-
 use std::time::Duration;
 use http::{Uri, uri::Parts as UriParts, Method};
 use futures::Stream;
@@ -7,11 +6,13 @@ use bytes::Bytes;
 use crate::uri_tools::*;
 use crate::natmap::{NatMap, NatMapPtr};
 use crate::error::*;
-use crate::rest_client::{HttpyClient};
+use crate::https::*;
+use crate::rest_client::{HttpyClient, HttpxEndpoint};
 pub use crate::rest_client::{ErrorD, DResult, Data};
 use crate::datatypes::*;
 use crate::op::*;
 use crate::config::*;
+
 
 /// Asynchronous WebHDFS client
 pub struct HdfsClient {
@@ -21,7 +22,8 @@ pub struct HdfsClient {
     default_timeout: Duration,
     user_name: Option<String>,
     doas: Option<String>,
-    dt: Option<String>
+    dt: Option<String>,
+    https_settings: Option<HttpsSettingsPtr>
 }
 
 /// Builder for `HdfsClient`
@@ -40,7 +42,8 @@ impl HdfsClientBuilder {
                 default_timeout: Duration::from_secs(Self::DEFAULT_TIMEOUT_S),
                 user_name: None,
                 doas: None,
-                dt: None
+                dt: None,
+                https_settings: None
         }  } 
     }
 
@@ -63,9 +66,13 @@ impl HdfsClientBuilder {
                 doas:
                     conf.doas,
                 dt: 
-                    conf.dt
+                    conf.dt,
+                https_settings:
+                    conf.https_config.map(|s| https_settings_ptr(s.into()))
         }  } 
     }
+
+    
 
     /// Creates new builder, filled with the configuration read from configuration files.
     /// See comments at `crate::config` for detailed semantics.
@@ -78,6 +85,9 @@ impl HdfsClientBuilder {
 
     pub fn alt_entrypoint(self, alt_entrypoint: Uri) -> Self {
         Self { c: HdfsClient { alt_entrypoint: Some(alt_entrypoint.into_parts()), ..self.c } }
+    }
+    pub fn https_settings(self, https_settings: HttpsSettings) -> Self {
+        Self { c: HdfsClient { https_settings: Some(https_settings_ptr(https_settings)), ..self.c } }
     }
     pub fn natmap(self, natmap: NatMap) -> Self {
         Self { c: HdfsClient { natmap: NatMapPtr::new(natmap), ..self.c } }
@@ -110,7 +120,7 @@ pub enum FOState { PRIMARY, ALT }
 impl FOState {
     #[inline]
     pub fn is_alt(&self) -> bool{ if let Self::ALT = self { true } else { false } }
-    fn next(self) -> Self { if let Self::ALT = self { Self::PRIMARY } else { Self::ALT } }
+    pub fn next(self) -> Self { if let Self::ALT = self { Self::PRIMARY } else { Self::ALT } }
 }
 
 pub type FOStdResult<T,E> = StdResult<(T, FOState), (E, FOState)>;
@@ -180,6 +190,7 @@ impl HdfsClient {
     const SVC_MOUNT_POINT: &'static str = "/webhdfs/v1";
 
     fn natmap(&self) -> NatMapPtr { self.natmap.clone() }
+    fn https_settings(&self) -> Option<HttpsSettingsPtr> { self.https_settings.clone() }
 
     fn path_and_query(&self, file_path: &str, op: Op, args: Vec<OpArg>) -> Vec<u8> {
         let q = PathEncoder::new(Self::SVC_MOUNT_POINT).extend(file_path).query();
@@ -214,8 +225,9 @@ impl HdfsClient {
     #[inline]
     fn httpc(&self, fostate: FOState, pq: &[u8]) -> FOResult<HttpyClient> {
         let natmap = self.natmap();
+        let https_settings = self.https_settings();
         let (uri, fostate) = self.uri(fostate, pq)?;
-        Ok((HttpyClient::new(uri, natmap), fostate))
+        Ok((HttpyClient::new(HttpxEndpoint::new(uri, https_settings), natmap), fostate))
     }
 
     #[inline]

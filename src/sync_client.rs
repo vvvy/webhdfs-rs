@@ -16,6 +16,7 @@ use crate::error::*;
 use crate::datatypes::*;
 use crate::async_client::*;
 use crate::natmap::NatMap;
+use crate::https::HttpsSettings;
 
 pub use crate::op::*;
 
@@ -43,6 +44,12 @@ impl SyncHdfsClientBuilder {
     }
     pub fn from_config_opt() -> Option<Self> { 
         HdfsClientBuilder::from_config_opt().map(|a| Self { a })
+    }
+    pub fn alt_entrypoint(self, alt_entrypoint: Uri) -> Self {
+        Self { a: self.a.alt_entrypoint(alt_entrypoint), ..self }
+    }
+    pub fn https_settings(self, https_settings: HttpsSettings) -> Self {
+        Self { a: self.a.https_settings(https_settings), ..self }
     }
     pub fn natmap(self, natmap: NatMap) -> Self {
         Self { a: self.a.natmap(natmap), ..self }
@@ -76,6 +83,10 @@ impl SyncHdfsClient {
             fostate: FOState::PRIMARY
         })
     }
+
+    pub fn fostate(&self) -> FOState { self.fostate }
+
+    pub fn with_fostate(self, fostate: FOState) -> Self { Self { fostate, ..self } }
     
     #[inline]
     fn exec<R, E>(&self, f: impl Future<Output=FOStdResult<R, E>>) -> FOStdResult<R, E> where E: From<tokio::time::Elapsed>{

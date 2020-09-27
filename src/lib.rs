@@ -19,6 +19,7 @@
 
 #[macro_use] 
 mod error;
+mod https;
 mod rest_client;
 mod natmap;
 mod uri_tools;

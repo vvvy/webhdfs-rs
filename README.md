@@ -32,6 +32,7 @@ TODO list (2nd checkbox is IT coverage)
 - [X] Basic delegation token support
 - [ ] Full delegation token support
 - [ ] webhdfs tool
+- [X] failover support (`[X]`)
 
 ## Building and testing
 

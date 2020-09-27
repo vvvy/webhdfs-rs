@@ -49,6 +49,32 @@ impl Serialize for UriW {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct HttpsConfig {
+    pub danger_accept_invalid_certs: Option<bool>,
+    pub danger_accept_invalid_hostnames: Option<bool>,
+    pub use_sni: Option<bool>,
+    pub identity_file: Option<String>,
+    pub identity_password: Option<String>,
+    pub min_protocol_version: Option<String>,
+    pub max_protocol_version: Option<String>,
+    pub root_certificates: Option<Vec<String>>
+}
+
+impl HttpsConfig {
+    pub fn new() -> Self { 
+        Self {
+            danger_accept_invalid_certs: None,
+            danger_accept_invalid_hostnames: None,
+            use_sni: None,
+            identity_file: None,
+            identity_password: None,
+            min_protocol_version: None,
+            max_protocol_version: None,
+            root_certificates: None        
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
@@ -58,7 +84,8 @@ pub struct Config {
     pub user_name: Option<String>,
     pub doas: Option<String>,
     pub dt: Option<String>,
-    pub natmap: Option<HashMap<String, String>>
+    pub natmap: Option<HashMap<String, String>>,
+    pub https_config: Option<HttpsConfig>
 }
 
 impl Config {
@@ -70,7 +97,8 @@ impl Config {
             user_name: None,
             doas: None,
             dt: None,
-            natmap: None
+            natmap: None,
+            https_config: None
         }
     }
 }
