@@ -71,6 +71,7 @@ e=entrypoint, ae=alt_entrypoint, n=natmap, u=user, d=dtoken);
     let source = file_as_string("./test-data/source");
     let target = file_as_string("./test-data/target");
     let size = file_as_string("./test-data/size").parse::<i64>().unwrap();
+    let dirsource = file_as_string_opt("./test-data/dirsource");
     println!("
 source='{s}'
 readscript='{r}'
@@ -96,6 +97,12 @@ s=source, r=readscript, t=target, w=writescript, z=size);
     dir_resp.unwrap().file_statuses.file_status.into_iter().find(|fs| fs.path_suffix == source_fn)
     .ok_or("cannot find sourcefile in hdfs")
     .unwrap();
+
+    if let Some(dirsource_dir) = dirsource {
+        let dir_resp = cx.dir(&dirsource_dir);
+        println!("Dir: {:?}", dir_resp);
+        let _ = dir_resp.unwrap(); 
+    }
 
     let stat_resp = cx.stat(&source);
     println!("Stat: {:?}", stat_resp);

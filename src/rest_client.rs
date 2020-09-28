@@ -3,7 +3,7 @@ use futures::{Stream, FutureExt, StreamExt};
 use hyper::{
     Request, Response, Body, Uri,
     client::{Client, ResponseFuture, HttpConnector},
-    body::aggregate
+    body::to_bytes
 };
 use hyper_tls::HttpsConnector;
 use http::{uri::Scheme, request::Builder as RequestBuilder, method::Method};
@@ -82,7 +82,7 @@ async fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Result<Re
     } else {
         //Failure: try to retrieve JSON error message
         if match_mimes(&ct, RCT::JSON) {
-            match aggregate(res.into_body()).await {
+            match to_bytes(res.into_body()).await {
                 Ok(buf) => match serde_json::from_slice::<RemoteExceptionResponse>(buf.bytes()) {
                     Ok(rer) => Err(rer.remote_exception.into()),
                     Err(e) => Err(app_error!(generic "JSON-error deseriaization error: {}, recovered text: '{}'", 
@@ -104,7 +104,7 @@ where R: serde::de::DeserializeOwned + Send {
     trace!("HTTP JSON Response {} ct={:?} cl={:?}", 
         res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH)
     );
-    let buf = aggregate(res.into_body()).await?;
+    let buf = to_bytes(res.into_body()).await?;
     serde_json::from_slice(buf.bytes()).aerr("JSON deseriaization error")
 }
 
@@ -125,7 +125,7 @@ async fn extract_empty(res: Response<Body>) -> Result<()> {
         res.headers().get(hyper::header::CONTENT_TYPE), 
         res.headers().get(hyper::header::CONTENT_LENGTH)
     );
-    let buf = aggregate(res.into_body()).await?;
+    let buf = to_bytes(res.into_body()).await?;
     if buf.bytes().is_empty() {
         Ok(())
     } else {
