@@ -1,5 +1,9 @@
 # webhdfs
 
+### Version 0.3.1
+
+* Fixed: http dir request don't return whole string. #5
+
 ### Version 0.3.0
 
 * Namenode failover handling
