@@ -240,6 +240,10 @@ impl ReadHdfsFile {
 
 impl Read for ReadHdfsFile {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        
+        if self.pos == self.len {
+            return Ok(0);
+        }
 
         let buf_len: i64 = buf.len().try_into().map_err(|_| IoError::new(IoErrorKind::InvalidInput, "buffer too big"))?;
         let s = self.cx.open(&self.path, OpenOptions::new().offset(self.pos).length(buf_len))?;
