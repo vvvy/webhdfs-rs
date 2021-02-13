@@ -212,7 +212,7 @@ error_conversions!{
 }
 
 error_conversions_noarg!{
-    Timeout(tokio::time::Elapsed)
+    Timeout(tokio::time::error::Elapsed)
 }
 
 impl From<Error> for std::io::Error {

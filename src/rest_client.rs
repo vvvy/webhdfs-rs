@@ -175,8 +175,8 @@ impl ErrorD {
     pub fn drop(Self { error, data_opt: _ } : Self) -> Error { error }
 }
 
-impl From<tokio::time::Elapsed> for ErrorD {
-    fn from(e: tokio::time::Elapsed) -> Self { Self::lift(e.into()) }
+impl From<tokio::time::error::Elapsed> for ErrorD {
+    fn from(e: tokio::time::error::Elapsed) -> Self { Self::lift(e.into()) }
 }
 
 /// Result with optional data recovered from error
