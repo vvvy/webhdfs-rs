@@ -8,7 +8,7 @@ pub type Result<T> = StdResult<T, Error>;
 #[derive(Debug)]
 pub enum Cause {
     None,
-    Hyper(hyper::error::Error),
+    Hyper(hyper::Error),
     HyperHeaderToStr(hyper::header::ToStrError),
     MimeFromStr(mime::FromStrError),
     SerdeJson(serde_json::Error),
@@ -197,7 +197,7 @@ macro_rules! error_conversions_noarg {
 
 
 error_conversions!{
-    Hyper(hyper::error::Error),
+    Hyper(hyper::Error),
     HyperHeaderToStr(hyper::header::ToStrError),
     MimeFromStr(mime::FromStrError),
     SerdeJson(serde_json::Error),
