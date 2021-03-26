@@ -21,7 +21,7 @@ use crate::https::HttpsSettings;
 pub use crate::op::*;
 
 #[inline]
-fn single_threaded_runtime() -> Result<Runtime> { Ok(Builder::new().basic_scheduler().enable_io().enable_time().build()?) }
+fn single_threaded_runtime() -> Result<Runtime> { Ok(Builder::new_current_thread().enable_all().build()?) }
 
 /// HDFS Connection data, etc.
 #[derive(Clone)]
@@ -89,8 +89,10 @@ impl SyncHdfsClient {
     pub fn with_fostate(self, fostate: FOState) -> Self { Self { fostate, ..self } }
     
     #[inline]
-    fn exec<R, E>(&self, f: impl Future<Output=FOStdResult<R, E>>) -> FOStdResult<R, E> where E: From<tokio::time::Elapsed>{
-        async fn with_timeout<R, E>(f: impl Future<Output=FOStdResult<R, E>>, fostate: FOState, timeout: Duration) -> FOStdResult<R, E> where E: From<tokio::time::Elapsed> {
+    fn exec<R, E>(&self, f: impl Future<Output=FOStdResult<R, E>>) -> FOStdResult<R, E> where E: From<tokio::time::error::Elapsed>{
+        async fn with_timeout<R, E>(f: impl Future<Output=FOStdResult<R, E>>, fostate: FOState, timeout: Duration) 
+        -> FOStdResult<R, E> 
+        where E: From<tokio::time::error::Elapsed> {
             Ok(tokio::time::timeout(timeout, f).await.map_err(|e| (e.into(), fostate))??)
         }
         self.rt.borrow_mut().block_on(with_timeout(f, self.fostate, self.acx.default_timeout().clone()))

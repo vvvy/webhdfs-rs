@@ -83,10 +83,10 @@ async fn error_and_ct_filter(ct_required: RCT, res: Response<Body>) -> Result<Re
         //Failure: try to retrieve JSON error message
         if match_mimes(&ct, RCT::JSON) {
             match to_bytes(res.into_body()).await {
-                Ok(buf) => match serde_json::from_slice::<RemoteExceptionResponse>(buf.bytes()) {
+                Ok(buf) => match serde_json::from_reader::<_, RemoteExceptionResponse>(buf.clone().reader()) {
                     Ok(rer) => Err(rer.remote_exception.into()),
                     Err(e) => Err(app_error!(generic "JSON-error deseriaization error: {}, recovered text: '{}'", 
-                        e, String::from_utf8_lossy(buf.bytes().as_ref())
+                        e, String::from_utf8_lossy(buf.chunk().as_ref())
                     ))
                 }
                 Err(e) => Err(app_error!(generic "JSON-error aggregation error: {}", e))
@@ -105,7 +105,7 @@ where R: serde::de::DeserializeOwned + Send {
         res.status(), res.headers().get(hyper::header::CONTENT_TYPE), res.headers().get(hyper::header::CONTENT_LENGTH)
     );
     let buf = to_bytes(res.into_body()).await?;
-    serde_json::from_slice(buf.bytes()).aerr("JSON deseriaization error")
+    serde_json::from_reader(buf.reader()).aerr("JSON deseriaization error")
 }
 
 #[inline]
@@ -126,7 +126,7 @@ async fn extract_empty(res: Response<Body>) -> Result<()> {
         res.headers().get(hyper::header::CONTENT_LENGTH)
     );
     let buf = to_bytes(res.into_body()).await?;
-    if buf.bytes().is_empty() {
+    if !buf.has_remaining() {
         Ok(())
     } else {
         Err(app_error!(generic "Unexpected non-empty response received, where empty is expected"))
@@ -175,8 +175,8 @@ impl ErrorD {
     pub fn drop(Self { error, data_opt: _ } : Self) -> Error { error }
 }
 
-impl From<tokio::time::Elapsed> for ErrorD {
-    fn from(e: tokio::time::Elapsed) -> Self { Self::lift(e.into()) }
+impl From<tokio::time::error::Elapsed> for ErrorD {
+    fn from(e: tokio::time::error::Elapsed) -> Self { Self::lift(e.into()) }
 }
 
 /// Result with optional data recovered from error

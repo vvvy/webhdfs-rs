@@ -15,7 +15,7 @@ This the default and the recommended method. It is inherently agnostic to Hadoop
 
 You will need a remote Hadoop cluster available over ssh. SSH tunelling is used for port forwarding, and scp is used to bring local files to the remote system and vice versa.
 
-To run the script, you need WSL installed on the local computer.
+To run the script under Windows, you need WSL installed on the local computer. In addition, ssh must be installed and properly configured (see below).
 
 In the local configuration file, add the following settings (mandatory unless otherwise specified):
 
@@ -49,8 +49,10 @@ C_TESTDATA_DIR=/tmp/test-data
 In order for the test to succeed, ensure the following:
 
 1. Any necessary public and private keys are configured so there is no need for ssh password throughout the test script
-2. `hdfs` command is available for the ssh user at the ssh target machine, and is directly executable (i.e. available in the PATH)
-3. The local filesystem of the ssh target host has free space at least three times the size of the test file.
+2. ssh tunneling is enabled on the server
+3. `hdfs` command is available for the ssh user at the ssh target machine, and is directly executable (i.e. available in the `PATH`)
+4. The local filesystem of the ssh target host has free space at least three times the size of the test file.
+5. Namenode/datanode hostnames are resolvabe at the remote end (of course, IP addresses can be used in place of hostnames)
 
 If Kerberos authentication is enabled on the remote cluster:
 
