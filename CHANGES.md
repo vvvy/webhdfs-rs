@@ -1,5 +1,12 @@
 # webhdfs
 
+### Version 0.3.3
+
+* `tokio` 1.2
+* `hyper` 0.14
+* `hyper-tls` 0.5
+* `bytes` 1.0
+
 ### Version 0.3.2
 
 * Sync `read` now returns 0 on EOF. PR #8
